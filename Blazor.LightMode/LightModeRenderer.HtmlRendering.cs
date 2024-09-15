@@ -218,8 +218,6 @@ public partial class LightModeRenderer
     {
         capturedValueAttribute = null;
         
-        output.Write($" __bl_id=\"{componentId}\"");
-        
         for (var i = 0; i < maxElements; i++)
         {
             var candidateIndex = position + i;
@@ -255,15 +253,6 @@ public partial class LightModeRenderer
                     output.Write('=');
                     output.Write('\"');
                     _htmlEncoder.Encode(output, value);
-                    output.Write('\"');
-                    break;
-                case Delegate @delegate:
-                    output.Write(' ');
-                    output.Write("__bl_" +frame.AttributeName);
-                    output.Write('=');
-                    output.Write('\"');
-                    var delegateKey = frame.AttributeEventHandlerId.ToString();
-                    _htmlEncoder.Encode(output, delegateKey);
                     output.Write('\"');
                     break;
             }

@@ -57,8 +57,9 @@ function boot() {
 }
 
 window['DotNet'] = DotNet;
-
-boot();
+document.addEventListener("DOMContentLoaded", function(event) {
+    boot();
+});
 
 function renderBatchLightMode(serializedRenderBatch: string) {
     const binaryBatch = base64ToUint8Array(serializedRenderBatch);
@@ -74,7 +75,7 @@ function invokeMethodAsyncLightMode<T>(methodIdentifier: string, ...args: any[])
     // return the response as a promise
 
     return new Promise<T>((resolve, reject) => {
-        fetch(`/dynamic/invokeMethodAsync`, {
+        fetch(`invokeMethodAsync`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

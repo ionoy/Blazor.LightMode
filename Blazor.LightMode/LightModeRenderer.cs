@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.Encodings.Web;
@@ -60,7 +61,11 @@ public partial class LightModeRenderer : WebRenderer
         return new LightModeRootComponent(this, componentId, quiescenceTask);
     }
 
-    protected override void HandleException(Exception exception) => throw exception;
+    protected override void HandleException(Exception exception)
+    {
+        Console.WriteLine(exception);
+        throw exception;
+    }
 
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
     {
@@ -72,6 +77,10 @@ public partial class LightModeRenderer : WebRenderer
     {
         Console.WriteLine($"Attaching component {componentId} to {domElementSelector}");
     }
+
+    protected override IComponent ResolveComponentForRenderMode(Type componentType, int? parentComponentId, IComponentActivator componentActivator, IComponentRenderMode renderMode)
+        => componentActivator.CreateInstance(componentType);
+    
     public async Task InvokeMethodAsync(string? assemblyName, string? methodIdentifier, JsonElement[] args)
     {
         if (methodIdentifier == nameof(LightModeInteropMethods.DispatchEventAsync))

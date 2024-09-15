@@ -18,6 +18,6 @@
     }
   },
   "files": [
-    "./src/Boot.Server.Custom.ts"
+    "./src/Boot.LightMode.ts"
   ]
 }
