@@ -1,0 +1,1 @@
+{"version":3,"file":"pkg-version.js","sourceRoot":"","sources":["../../src/pkg-version.ts"],"names":[],"mappings":"AAAA,MAAM,CAAC,MAAM,OAAO,GAAG,WAAW,CAAC","sourcesContent":["export const VERSION = '5.0.0-dev';"]}
