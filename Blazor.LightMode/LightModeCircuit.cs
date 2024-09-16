@@ -52,6 +52,17 @@ public class LightModeCircuit : IDisposable
         _serviceScope.Dispose();
         _loggerFactory.Dispose();
     }
+    
+    public async Task<LightModeResponse> LocationChangedAsync(string location)
+    {
+        var navigationManager = (LightModeNavigationManager)Services.GetRequiredService<NavigationManager>();
+        await _renderer.Dispatcher.InvokeAsync(() => {
+            navigationManager.NotifyLocationChanged(location);
+        }).ConfigureAwait(false);
+        var renderBatches = _renderer.GetSerializedRenderBatches();
+        
+        return new LightModeResponse(renderBatches);
+    }
 }
 
 public record LightModeResponse(IReadOnlyList<string> SerializedRenderBatches);

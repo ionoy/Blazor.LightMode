@@ -70,6 +70,32 @@
   const browserEventNamesToAliases = new Map();
   const createBlankEventArgsOptions = { createEventArgs: () => ({}) };
   const eventNameAliasRegisteredCallbacks = [];
+  function registerCustomEventType(eventName, options) {
+      if (!options) {
+          throw new Error('The options parameter is required.');
+      }
+      // There can't be more than one registration for the same event name because then we wouldn't
+      // know which eventargs data to supply.
+      if (eventTypeRegistry.has(eventName)) {
+          throw new Error(`The event '${eventName}' is already registered.`);
+      }
+      // If applicable, register this as an alias of the given browserEventName
+      if (options.browserEventName) {
+          const aliasGroup = browserEventNamesToAliases.get(options.browserEventName);
+          if (aliasGroup) {
+              aliasGroup.push(eventName);
+          }
+          else {
+              browserEventNamesToAliases.set(options.browserEventName, [eventName]);
+          }
+          // For developer convenience, it's allowed to register the custom event type *after*
+          // some listeners for it are already present. Once the event name alias gets registered,
+          // we have to notify any existing event delegators so they can update their delegated
+          // events list.
+          eventNameAliasRegisteredCallbacks.forEach(callback => callback(eventName, options.browserEventName));
+      }
+      eventTypeRegistry.set(eventName, options);
+  }
   function getEventTypeOptions(eventName) {
       return eventTypeRegistry.get(eventName);
   }
@@ -853,6 +879,110 @@
 
   // Licensed to the .NET Foundation under one or more agreements.
   // The .NET Foundation licenses this file to you under the MIT license.
+  const pendingRootComponentContainerNamePrefix = '__bl-dynamic-root:';
+  const pendingRootComponentContainers = new Map();
+  let nextPendingDynamicRootComponentIdentifier = 0;
+  let manager;
+  let jsComponentParametersByIdentifier;
+  // These are the public APIs at Blazor.rootComponents.*
+  const RootComponentsFunctions = {
+      async add(toElement, componentIdentifier, initialParameters) {
+          if (!initialParameters) {
+              throw new Error('initialParameters must be an object, even if empty.');
+          }
+          // Track the container so we can use it when the component gets attached to the document via a selector
+          const containerIdentifier = pendingRootComponentContainerNamePrefix + (++nextPendingDynamicRootComponentIdentifier).toString();
+          pendingRootComponentContainers.set(containerIdentifier, toElement);
+          // Instruct .NET to add and render the new root component
+          const componentId = await getRequiredManager().invokeMethodAsync('AddRootComponent', componentIdentifier, containerIdentifier);
+          const component = new DynamicRootComponent(componentId, jsComponentParametersByIdentifier[componentIdentifier]);
+          await component.setParameters(initialParameters);
+          return component;
+      },
+  };
+  class EventCallbackWrapper {
+      invoke(arg) {
+          return this._callback(arg);
+      }
+      setCallback(callback) {
+          if (!this._selfJSObjectReference) {
+              this._selfJSObjectReference = DotNet.createJSObjectReference(this);
+          }
+          this._callback = callback;
+      }
+      getJSObjectReference() {
+          return this._selfJSObjectReference;
+      }
+      dispose() {
+          if (this._selfJSObjectReference) {
+              DotNet.disposeJSObjectReference(this._selfJSObjectReference);
+          }
+      }
+  }
+  class DynamicRootComponent {
+      constructor(componentId, parameters) {
+          this._jsEventCallbackWrappers = new Map();
+          this._componentId = componentId;
+          for (const parameter of parameters) {
+              if (parameter.type === 'eventcallback') {
+                  this._jsEventCallbackWrappers.set(parameter.name.toLowerCase(), new EventCallbackWrapper());
+              }
+          }
+      }
+      setParameters(parameters) {
+          const mappedParameters = {};
+          const entries = Object.entries(parameters || {});
+          const parameterCount = entries.length;
+          for (const [key, value] of entries) {
+              const callbackWrapper = this._jsEventCallbackWrappers.get(key.toLowerCase());
+              if (!callbackWrapper || !value) {
+                  mappedParameters[key] = value;
+                  continue;
+              }
+              callbackWrapper.setCallback(value);
+              mappedParameters[key] = callbackWrapper.getJSObjectReference();
+          }
+          return getRequiredManager().invokeMethodAsync('SetRootComponentParameters', this._componentId, parameterCount, mappedParameters);
+      }
+      async dispose() {
+          if (this._componentId !== null) {
+              await getRequiredManager().invokeMethodAsync('RemoveRootComponent', this._componentId);
+              this._componentId = null; // Ensure it can't be used again
+              for (const jsEventCallbackWrapper of this._jsEventCallbackWrappers.values()) {
+                  jsEventCallbackWrapper.dispose();
+              }
+          }
+      }
+  }
+  // Called by the framework
+  function enableJSRootComponents(managerInstance, jsComponentParameters, jsComponentInitializers) {
+      if (manager) {
+          // This will only happen in very nonstandard cases where someone has multiple hosts.
+          // It's up to the developer to ensure that only one of them enables dynamic root components.
+          throw new Error('Dynamic root components have already been enabled.');
+      }
+      manager = managerInstance;
+      jsComponentParametersByIdentifier = jsComponentParameters;
+      // Call the registered initializers. This is an arbitrary subset of the JS component types that are registered
+      // on the .NET side - just those of them that require some JS-side initialization (e.g., to register them
+      // as custom elements).
+      for (const [initializerIdentifier, componentIdentifiers] of Object.entries(jsComponentInitializers)) {
+          const initializerFunc = DotNet.findJSFunction(initializerIdentifier, 0);
+          for (const componentIdentifier of componentIdentifiers) {
+              const parameters = jsComponentParameters[componentIdentifier];
+              initializerFunc(componentIdentifier, parameters);
+          }
+      }
+  }
+  function getRequiredManager() {
+      if (!manager) {
+          throw new Error('Dynamic root components have not been enabled in this application.');
+      }
+      return manager;
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
   const interopMethodsByRenderer = new Map();
   const rendererAttachedListeners = [];
   const rendererByIdResolverMap = new Map();
@@ -861,8 +991,15 @@
           throw new Error(`Interop methods are already registered for renderer ${rendererId}`);
       }
       interopMethodsByRenderer.set(rendererId, interopMethods);
+      if (jsComponentParameters && jsComponentInitializers && Object.keys(jsComponentParameters).length > 0) {
+          const manager = getInteropMethods(rendererId);
+          enableJSRootComponents(manager, jsComponentParameters, jsComponentInitializers);
+      }
       rendererByIdResolverMap.get(rendererId)?.[0]?.();
       invokeRendererAttachedListeners(rendererId);
+  }
+  function isRendererAttached(browserRendererId) {
+      return interopMethodsByRenderer.has(browserRendererId);
   }
   function invokeRendererAttachedListeners(browserRendererId) {
       for (const listener of rendererAttachedListeners) {
@@ -1473,15 +1610,327 @@
 
   // Licensed to the .NET Foundation under one or more agreements.
   // The .NET Foundation licenses this file to you under the MIT license.
+  let interactiveRouterRendererId = undefined;
+  let programmaticEnhancedNavigationHandler;
+  /**
+   * Checks if a click event corresponds to an <a> tag referencing a URL within the base href, and that interception
+   * isn't bypassed (e.g., by a 'download' attribute or the user holding a meta key while clicking).
+   * @param event The event that occurred
+   * @param callbackIfIntercepted A callback that will be invoked if the event corresponds to a click on an <a> that can be intercepted.
+   */
+  function handleClickForNavigationInterception(event, callbackIfIntercepted) {
+      if (event.button !== 0 || eventHasSpecialKey(event)) {
+          // Don't stop ctrl/meta-click (etc) from opening links in new tabs/windows
+          return;
+      }
+      if (event.defaultPrevented) {
+          return;
+      }
+      // Intercept clicks on all <a> elements where the href is within the <base href> URI space
+      // We must explicitly check if it has an 'href' attribute, because if it doesn't, the result might be null or an empty string depending on the browser
+      const anchorTarget = findAnchorTarget(event);
+      if (anchorTarget && canProcessAnchor(anchorTarget)) {
+          const anchorHref = anchorTarget.getAttribute('href');
+          const absoluteHref = toAbsoluteUri(anchorHref);
+          if (isWithinBaseUriSpace(absoluteHref)) {
+              event.preventDefault();
+              callbackIfIntercepted(absoluteHref);
+          }
+      }
+  }
+  function isWithinBaseUriSpace(href) {
+      const baseUriWithoutTrailingSlash = toBaseUriWithoutTrailingSlash(document.baseURI);
+      const nextChar = href.charAt(baseUriWithoutTrailingSlash.length);
+      return href.startsWith(baseUriWithoutTrailingSlash)
+          && (nextChar === '' || nextChar === '/' || nextChar === '?' || nextChar === '#');
+  }
+  function isSamePageWithHash(absoluteHref) {
+      const url = new URL(absoluteHref);
+      return url.hash !== '' && location.origin === url.origin && location.pathname === url.pathname && location.search === url.search;
+  }
+  function performScrollToElementOnTheSamePage(absoluteHref) {
+      const hashIndex = absoluteHref.indexOf('#');
+      if (hashIndex === absoluteHref.length - 1) {
+          return;
+      }
+      const identifier = absoluteHref.substring(hashIndex + 1);
+      scrollToElement(identifier);
+  }
+  function scrollToElement(identifier) {
+      document.getElementById(identifier)?.scrollIntoView();
+  }
+  function hasProgrammaticEnhancedNavigationHandler() {
+      return programmaticEnhancedNavigationHandler !== undefined;
+  }
+  function performProgrammaticEnhancedNavigation(absoluteInternalHref, replace) {
+      {
+          throw new Error('No enhanced programmatic navigation handler has been attached');
+      }
+  }
+  function toBaseUriWithoutTrailingSlash(baseUri) {
+      return baseUri.substring(0, baseUri.lastIndexOf('/'));
+  }
+  let testAnchor;
+  function toAbsoluteUri(relativeUri) {
+      testAnchor = testAnchor || document.createElement('a');
+      testAnchor.href = relativeUri;
+      return testAnchor.href;
+  }
+  function eventHasSpecialKey(event) {
+      return event.ctrlKey || event.shiftKey || event.altKey || event.metaKey;
+  }
+  function canProcessAnchor(anchorTarget) {
+      const targetAttributeValue = anchorTarget.getAttribute('target');
+      const opensInSameFrame = !targetAttributeValue || targetAttributeValue === '_self';
+      return opensInSameFrame && anchorTarget.hasAttribute('href') && !anchorTarget.hasAttribute('download');
+  }
+  function findAnchorTarget(event) {
+      const path = event.composedPath && event.composedPath();
+      if (path) {
+          // This logic works with events that target elements within a shadow root,
+          // as long as the shadow mode is 'open'. For closed shadows, we can't possibly
+          // know what internal element was clicked.
+          for (let i = 0; i < path.length; i++) {
+              const candidate = path[i];
+              if (candidate instanceof HTMLAnchorElement || candidate instanceof SVGAElement) {
+                  return candidate;
+              }
+          }
+      }
+      return null;
+  }
+  function hasInteractiveRouter() {
+      return interactiveRouterRendererId !== undefined;
+  }
+  function getInteractiveRouterRendererId() {
+      return interactiveRouterRendererId;
+  }
+  function setHasInteractiveRouter(rendererId) {
+      if (interactiveRouterRendererId !== undefined && interactiveRouterRendererId !== rendererId) {
+          throw new Error('Only one interactive runtime may enable navigation interception at a time.');
+      }
+      interactiveRouterRendererId = rendererId;
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
+  let hasRegisteredNavigationEventListeners = false;
+  let currentHistoryIndex = 0;
+  let currentLocationChangingCallId = 0;
+  const navigationCallbacks = new Map();
+  let popStateCallback = onBrowserInitiatedPopState;
+  let resolveCurrentNavigation = null;
+  // These are the functions we're making available for invocation from .NET
+  const internalFunctions = {
+      listenForNavigationEvents,
+      enableNavigationInterception: setHasInteractiveRouter,
+      setHasLocationChangingListeners,
+      endLocationChanging,
+      navigateTo: navigateToFromDotNet,
+      refresh,
+      getBaseURI: () => document.baseURI,
+      getLocationHref: () => location.href,
+      scrollToElement,
+  };
+  function listenForNavigationEvents(rendererId, locationChangedCallback, locationChangingCallback) {
+      navigationCallbacks.set(rendererId, {
+          rendererId,
+          hasLocationChangingEventListeners: false,
+          locationChanged: locationChangedCallback,
+          locationChanging: locationChangingCallback,
+      });
+      if (hasRegisteredNavigationEventListeners) {
+          return;
+      }
+      hasRegisteredNavigationEventListeners = true;
+      window.addEventListener('popstate', onPopState);
+      currentHistoryIndex = history.state?._index ?? 0;
+  }
+  function setHasLocationChangingListeners(rendererId, hasListeners) {
+      const callbacks = navigationCallbacks.get(rendererId);
+      if (!callbacks) {
+          throw new Error(`Renderer with ID '${rendererId}' is not listening for navigation events`);
+      }
+      callbacks.hasLocationChangingEventListeners = hasListeners;
+  }
   function attachToEventDelegator(eventDelegator) {
       // We need to respond to clicks on <a> elements *after* the EventDelegator has finished
       // running its simulated bubbling process so that we can respect any preventDefault requests.
       // So instead of registering our own native event, register using the EventDelegator.
       eventDelegator.notifyAfterClick(event => {
-          {
+          if (!hasInteractiveRouter()) {
               return;
           }
+          handleClickForNavigationInterception(event, absoluteInternalHref => {
+              performInternalNavigation(absoluteInternalHref, /* interceptedLink */ true, /* replace */ false);
+          });
       });
+  }
+  function refresh(forceReload) {
+      if (!forceReload && hasProgrammaticEnhancedNavigationHandler()) {
+          performProgrammaticEnhancedNavigation();
+      }
+      else {
+          location.reload();
+      }
+  }
+  function navigateTo(uri, forceLoadOrOptions, replaceIfUsingOldOverload = false) {
+      // Normalize the parameters to the newer overload (i.e., using NavigationOptions)
+      const options = forceLoadOrOptions instanceof Object
+          ? forceLoadOrOptions
+          : { forceLoad: forceLoadOrOptions, replaceHistoryEntry: replaceIfUsingOldOverload };
+      navigateToCore(uri, options);
+  }
+  function navigateToFromDotNet(uri, options) {
+      // The location changing callback is called from .NET for programmatic navigations originating from .NET.
+      // In this case, we shouldn't invoke the callback again from the JS side.
+      navigateToCore(uri, options, /* skipLocationChangingCallback */ true);
+  }
+  function navigateToCore(uri, options, skipLocationChangingCallback = false) {
+      const absoluteUri = toAbsoluteUri(uri);
+      if (!options.forceLoad && isWithinBaseUriSpace(absoluteUri)) {
+          if (shouldUseClientSideRouting()) {
+              performInternalNavigation(absoluteUri, false, options.replaceHistoryEntry, options.historyEntryState, skipLocationChangingCallback);
+          }
+          else {
+              performProgrammaticEnhancedNavigation(absoluteUri, options.replaceHistoryEntry);
+          }
+      }
+      else {
+          // For external navigation, we work in terms of the originally-supplied uri string,
+          // not the computed absoluteUri. This is in case there are some special URI formats
+          // we're unable to translate into absolute URIs.
+          performExternalNavigation(uri, options.replaceHistoryEntry);
+      }
+  }
+  function performExternalNavigation(uri, replace) {
+      if (location.href === uri) {
+          // If you're already on this URL, you can't append another copy of it to the history stack,
+          // so we can ignore the 'replace' flag. However, reloading the same URL you're already on
+          // requires special handling to avoid triggering browser-specific behavior issues.
+          // For details about what this fixes and why, see https://github.com/dotnet/aspnetcore/pull/10839
+          const temporaryUri = uri + '?';
+          history.replaceState(null, '', temporaryUri);
+          location.replace(uri);
+      }
+      else if (replace) {
+          location.replace(uri);
+      }
+      else {
+          location.href = uri;
+      }
+  }
+  async function performInternalNavigation(absoluteInternalHref, interceptedLink, replace, state = undefined, skipLocationChangingCallback = false) {
+      ignorePendingNavigation();
+      if (isSamePageWithHash(absoluteInternalHref)) {
+          saveToBrowserHistory(absoluteInternalHref, replace, state);
+          performScrollToElementOnTheSamePage(absoluteInternalHref);
+          return;
+      }
+      const callbacks = getInteractiveRouterNavigationCallbacks();
+      if (!skipLocationChangingCallback && callbacks?.hasLocationChangingEventListeners) {
+          const shouldContinueNavigation = await notifyLocationChanging(absoluteInternalHref, state, interceptedLink, callbacks);
+          if (!shouldContinueNavigation) {
+              return;
+          }
+      }
+      // Since this was *not* triggered by a back/forward gesture (that goes through a different
+      // code path starting with a popstate event), we don't want to preserve the current scroll
+      // position, so reset it.
+      // To avoid ugly flickering effects, we don't want to change the scroll position until
+      // we render the new page. As a best approximation, wait until the next batch.
+      resetScrollAfterNextBatch();
+      saveToBrowserHistory(absoluteInternalHref, replace, state);
+      await notifyLocationChanged(interceptedLink);
+  }
+  function saveToBrowserHistory(absoluteInternalHref, replace, state = undefined) {
+      if (!replace) {
+          currentHistoryIndex++;
+          history.pushState({
+              userState: state,
+              _index: currentHistoryIndex,
+          }, /* ignored title */ '', absoluteInternalHref);
+      }
+      else {
+          history.replaceState({
+              userState: state,
+              _index: currentHistoryIndex,
+          }, /* ignored title */ '', absoluteInternalHref);
+      }
+  }
+  function navigateHistoryWithoutPopStateCallback(delta) {
+      return new Promise(resolve => {
+          const oldPopStateCallback = popStateCallback;
+          popStateCallback = () => {
+              popStateCallback = oldPopStateCallback;
+              resolve();
+          };
+          history.go(delta);
+      });
+  }
+  function ignorePendingNavigation() {
+      if (resolveCurrentNavigation) {
+          resolveCurrentNavigation(false);
+          resolveCurrentNavigation = null;
+      }
+  }
+  function notifyLocationChanging(uri, state, intercepted, callbacks) {
+      return new Promise(resolve => {
+          ignorePendingNavigation();
+          currentLocationChangingCallId++;
+          resolveCurrentNavigation = resolve;
+          callbacks.locationChanging(currentLocationChangingCallId, uri, state, intercepted);
+      });
+  }
+  function endLocationChanging(callId, shouldContinueNavigation) {
+      if (resolveCurrentNavigation && callId === currentLocationChangingCallId) {
+          resolveCurrentNavigation(shouldContinueNavigation);
+          resolveCurrentNavigation = null;
+      }
+  }
+  async function onBrowserInitiatedPopState(state) {
+      ignorePendingNavigation();
+      const callbacks = getInteractiveRouterNavigationCallbacks();
+      if (callbacks?.hasLocationChangingEventListeners) {
+          const index = state.state?._index ?? 0;
+          const userState = state.state?.userState;
+          const delta = index - currentHistoryIndex;
+          const uri = location.href;
+          // Temporarily revert the navigation until we confirm if the navigation should continue.
+          await navigateHistoryWithoutPopStateCallback(-delta);
+          const shouldContinueNavigation = await notifyLocationChanging(uri, userState, false, callbacks);
+          if (!shouldContinueNavigation) {
+              return;
+          }
+          await navigateHistoryWithoutPopStateCallback(delta);
+      }
+      // We don't know if popstate was triggered for a navigation that can be handled by the client-side router,
+      // so we treat it as a intercepted link to be safe.
+      await notifyLocationChanged(/* interceptedLink */ true);
+  }
+  async function notifyLocationChanged(interceptedLink, internalDestinationHref) {
+      const uri = location.href;
+      await Promise.all(Array.from(navigationCallbacks, async ([rendererId, callbacks]) => {
+          if (isRendererAttached(rendererId)) {
+              await callbacks.locationChanged(uri, history.state?.userState, interceptedLink);
+          }
+      }));
+  }
+  async function onPopState(state) {
+      if (popStateCallback && shouldUseClientSideRouting()) {
+          await popStateCallback(state);
+      }
+      currentHistoryIndex = history.state?._index ?? 0;
+  }
+  function getInteractiveRouterNavigationCallbacks() {
+      const interactiveRouterRendererId = getInteractiveRouterRendererId();
+      if (interactiveRouterRendererId === undefined) {
+          return undefined;
+      }
+      return navigationCallbacks.get(interactiveRouterRendererId);
+  }
+  function shouldUseClientSideRouting() {
+      return hasInteractiveRouter() || !hasProgrammaticEnhancedNavigationHandler();
   }
 
   // Licensed to the .NET Foundation under one or more agreements.
@@ -2059,6 +2508,7 @@
   // Licensed to the .NET Foundation under one or more agreements.
   // The .NET Foundation licenses this file to you under the MIT license.
   const browserRenderers = {};
+  let shouldResetScrollAfterNextBatch = false;
   function attachRootComponentToLogicalElement(browserRendererId, logicalElement, componentId, appendContent) {
       let browserRenderer = browserRenderers[browserRendererId];
       if (!browserRenderer) {
@@ -2098,6 +2548,18 @@
       for (let i = 0; i < disposedEventHandlerIdsLength; i++) {
           const eventHandlerId = batch.disposedEventHandlerIdsEntry(disposedEventHandlerIdsValues, i);
           browserRenderer.disposeEventHandler(eventHandlerId);
+      }
+      resetScrollIfNeeded();
+  }
+  function resetScrollAfterNextBatch() {
+      shouldResetScrollAfterNextBatch = true;
+  }
+  function resetScrollIfNeeded() {
+      if (shouldResetScrollAfterNextBatch) {
+          shouldResetScrollAfterNextBatch = false;
+          // This assumes the scroller is on the window itself. There isn't a general way to know
+          // if some other element is playing the role of the primary scroll region.
+          window.scrollTo && window.scrollTo(0, 0);
       }
   }
 
@@ -2401,6 +2863,334 @@
 
   // Licensed to the .NET Foundation under one or more agreements.
   // The .NET Foundation licenses this file to you under the MIT license.
+  const domFunctions = {
+      focus,
+      focusBySelector
+  };
+  function focus(element, preventScroll) {
+      if (element instanceof HTMLElement) {
+          element.focus({ preventScroll });
+      }
+      else if (element instanceof SVGElement) {
+          if (element.hasAttribute('tabindex')) {
+              element.focus({ preventScroll });
+          }
+          else {
+              throw new Error('Unable to focus an SVG element that does not have a tabindex.');
+          }
+      }
+      else {
+          throw new Error('Unable to focus an invalid element.');
+      }
+  }
+  function focusBySelector(selector, preventScroll) {
+      const element = document.querySelector(selector);
+      if (element) {
+          // If no explicit tabindex is defined, mark it as programmatically-focusable.
+          // This does actually add a new HTML attribute, but it shouldn't interfere with
+          // diffing because diffing only deals with the attributes you have in your code.
+          if (!element.hasAttribute('tabindex')) {
+              element.tabIndex = -1;
+          }
+          element.focus({ preventScroll: true });
+      }
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
+  const Virtualize = {
+      init: init$1,
+      dispose,
+  };
+  const dispatcherObserversByDotNetIdPropname = Symbol();
+  function findClosestScrollContainer(element) {
+      // If we recurse up as far as body or the document root, return null so that the
+      // IntersectionObserver observes intersection with the top-level scroll viewport
+      // instead of the with body/documentElement which can be arbitrarily tall.
+      // See https://github.com/dotnet/aspnetcore/issues/37659 for more about what this fixes.
+      if (!element || element === document.body || element === document.documentElement) {
+          return null;
+      }
+      const style = getComputedStyle(element);
+      if (style.overflowY !== 'visible') {
+          return element;
+      }
+      return findClosestScrollContainer(element.parentElement);
+  }
+  function init$1(dotNetHelper, spacerBefore, spacerAfter, rootMargin = 50) {
+      // Overflow anchoring can cause an ongoing scroll loop, because when we resize the spacers, the browser
+      // would update the scroll position to compensate. Then the spacer would remain visible and we'd keep on
+      // trying to resize it.
+      const scrollContainer = findClosestScrollContainer(spacerBefore);
+      (scrollContainer || document.documentElement).style.overflowAnchor = 'none';
+      const rangeBetweenSpacers = document.createRange();
+      if (isValidTableElement(spacerAfter.parentElement)) {
+          spacerBefore.style.display = 'table-row';
+          spacerAfter.style.display = 'table-row';
+      }
+      const intersectionObserver = new IntersectionObserver(intersectionCallback, {
+          root: scrollContainer,
+          rootMargin: `${rootMargin}px`,
+      });
+      intersectionObserver.observe(spacerBefore);
+      intersectionObserver.observe(spacerAfter);
+      const mutationObserverBefore = createSpacerMutationObserver(spacerBefore);
+      const mutationObserverAfter = createSpacerMutationObserver(spacerAfter);
+      const { observersByDotNetObjectId, id } = getObserversMapEntry(dotNetHelper);
+      observersByDotNetObjectId[id] = {
+          intersectionObserver,
+          mutationObserverBefore,
+          mutationObserverAfter,
+      };
+      function createSpacerMutationObserver(spacer) {
+          // Without the use of thresholds, IntersectionObserver only detects binary changes in visibility,
+          // so if a spacer gets resized but remains visible, no additional callbacks will occur. By unobserving
+          // and reobserving spacers when they get resized, the intersection callback will re-run if they remain visible.
+          const observerOptions = { attributes: true };
+          const mutationObserver = new MutationObserver((mutations, observer) => {
+              if (isValidTableElement(spacer.parentElement)) {
+                  observer.disconnect();
+                  spacer.style.display = 'table-row';
+                  observer.observe(spacer, observerOptions);
+              }
+              intersectionObserver.unobserve(spacer);
+              intersectionObserver.observe(spacer);
+          });
+          mutationObserver.observe(spacer, observerOptions);
+          return mutationObserver;
+      }
+      function intersectionCallback(entries) {
+          entries.forEach((entry) => {
+              if (!entry.isIntersecting) {
+                  return;
+              }
+              // To compute the ItemSize, work out the separation between the two spacers. We can't just measure an individual element
+              // because each conceptual item could be made from multiple elements. Using getBoundingClientRect allows for the size to be
+              // a fractional value. It's important not to add or subtract any such fractional values (e.g., to subtract the 'top' of
+              // one item from the 'bottom' of another to get the distance between them) because floating point errors would cause
+              // scrolling glitches.
+              rangeBetweenSpacers.setStartAfter(spacerBefore);
+              rangeBetweenSpacers.setEndBefore(spacerAfter);
+              const spacerSeparation = rangeBetweenSpacers.getBoundingClientRect().height;
+              const containerSize = entry.rootBounds?.height;
+              if (entry.target === spacerBefore) {
+                  dotNetHelper.invokeMethodAsync('OnSpacerBeforeVisible', entry.intersectionRect.top - entry.boundingClientRect.top, spacerSeparation, containerSize);
+              }
+              else if (entry.target === spacerAfter && spacerAfter.offsetHeight > 0) {
+                  // When we first start up, both the "before" and "after" spacers will be visible, but it's only relevant to raise a
+                  // single event to load the initial data. To avoid raising two events, skip the one for the "after" spacer if we know
+                  // it's meaningless to talk about any overlap into it.
+                  dotNetHelper.invokeMethodAsync('OnSpacerAfterVisible', entry.boundingClientRect.bottom - entry.intersectionRect.bottom, spacerSeparation, containerSize);
+              }
+          });
+      }
+      function isValidTableElement(element) {
+          if (element === null) {
+              return false;
+          }
+          return ((element instanceof HTMLTableElement && element.style.display === '') || element.style.display === 'table')
+              || ((element instanceof HTMLTableSectionElement && element.style.display === '') || element.style.display === 'table-row-group');
+      }
+  }
+  function getObserversMapEntry(dotNetHelper) {
+      const dotNetHelperDispatcher = dotNetHelper['_callDispatcher'];
+      const dotNetHelperId = dotNetHelper['_id'];
+      dotNetHelperDispatcher[dispatcherObserversByDotNetIdPropname] ??= {};
+      return {
+          observersByDotNetObjectId: dotNetHelperDispatcher[dispatcherObserversByDotNetIdPropname],
+          id: dotNetHelperId,
+      };
+  }
+  function dispose(dotNetHelper) {
+      const { observersByDotNetObjectId, id } = getObserversMapEntry(dotNetHelper);
+      const observers = observersByDotNetObjectId[id];
+      if (observers) {
+          observers.intersectionObserver.disconnect();
+          observers.mutationObserverBefore.disconnect();
+          observers.mutationObserverAfter.disconnect();
+          dotNetHelper.dispose();
+          delete observersByDotNetObjectId[id];
+      }
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
+  const PageTitle = {
+      getAndRemoveExistingTitle,
+  };
+  function getAndRemoveExistingTitle() {
+      // Other <title> elements may exist outside <head> (e.g., inside <svg> elements) but they aren't page titles
+      const titleElements = document.head ? document.head.getElementsByTagName('title') : [];
+      if (titleElements.length === 0) {
+          return null;
+      }
+      let existingTitle = null;
+      for (let index = titleElements.length - 1; index >= 0; index--) {
+          const currentTitleElement = titleElements[index];
+          const previousSibling = currentTitleElement.previousSibling;
+          const isBlazorTitle = previousSibling instanceof Comment && getLogicalParent(previousSibling) !== null;
+          if (isBlazorTitle) {
+              continue;
+          }
+          if (existingTitle === null) {
+              existingTitle = currentTitleElement.textContent;
+          }
+          currentTitleElement.parentNode?.removeChild(currentTitleElement);
+      }
+      return existingTitle;
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
+  const InputFile = {
+      init,
+      toImageFile,
+      readFileData,
+  };
+  function init(callbackWrapper, elem) {
+      elem._blazorInputFileNextFileId = 0;
+      elem.addEventListener('click', function () {
+          // Permits replacing an existing file with a new one of the same file name.
+          elem.value = '';
+      });
+      elem.addEventListener('change', function () {
+          // Reduce to purely serializable data, plus an index by ID.
+          elem._blazorFilesById = {};
+          const fileList = Array.prototype.map.call(elem.files, function (file) {
+              const result = {
+                  id: ++elem._blazorInputFileNextFileId,
+                  lastModified: new Date(file.lastModified).toISOString(),
+                  name: file.name,
+                  size: file.size,
+                  contentType: file.type,
+                  readPromise: undefined,
+                  arrayBuffer: undefined,
+                  blob: file,
+              };
+              elem._blazorFilesById[result.id] = result;
+              return result;
+          });
+          callbackWrapper.invokeMethodAsync('NotifyChange', fileList);
+      });
+  }
+  async function toImageFile(elem, fileId, format, maxWidth, maxHeight) {
+      const originalFile = getFileById(elem, fileId);
+      const loadedImage = await new Promise(function (resolve) {
+          const originalFileImage = new Image();
+          originalFileImage.onload = function () {
+              URL.revokeObjectURL(originalFileImage.src);
+              resolve(originalFileImage);
+          };
+          originalFileImage.onerror = function () {
+              originalFileImage.onerror = null;
+              URL.revokeObjectURL(originalFileImage.src);
+          };
+          originalFileImage.src = URL.createObjectURL(originalFile['blob']);
+      });
+      const resizedImageBlob = await new Promise(function (resolve) {
+          const desiredWidthRatio = Math.min(1, maxWidth / loadedImage.width);
+          const desiredHeightRatio = Math.min(1, maxHeight / loadedImage.height);
+          const chosenSizeRatio = Math.min(desiredWidthRatio, desiredHeightRatio);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(loadedImage.width * chosenSizeRatio);
+          canvas.height = Math.round(loadedImage.height * chosenSizeRatio);
+          canvas.getContext('2d')?.drawImage(loadedImage, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(resolve, format);
+      });
+      const result = {
+          id: ++elem._blazorInputFileNextFileId,
+          lastModified: originalFile.lastModified,
+          name: originalFile.name,
+          size: resizedImageBlob?.size || 0,
+          contentType: format,
+          blob: resizedImageBlob ? resizedImageBlob : originalFile.blob,
+      };
+      elem._blazorFilesById[result.id] = result;
+      return result;
+  }
+  async function readFileData(elem, fileId) {
+      const file = getFileById(elem, fileId);
+      return file.blob;
+  }
+  function getFileById(elem, fileId) {
+      const file = elem._blazorFilesById[fileId];
+      if (!file) {
+          throw new Error(`There is no file with ID ${fileId}. The file list may have changed. See https://aka.ms/aspnet/blazor-input-file-multiple-selections.`);
+      }
+      return file;
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
+  const registeredLocks = new Set();
+  const NavigationLock = {
+      enableNavigationPrompt,
+      disableNavigationPrompt,
+  };
+  function onBeforeUnload(event) {
+      event.preventDefault();
+      // Modern browsers display a confirmation prompt when returnValue is some value other than
+      // null or undefined.
+      // See: https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event#compatibility_notes
+      event.returnValue = true;
+  }
+  function enableNavigationPrompt(id) {
+      if (registeredLocks.size === 0) {
+          window.addEventListener('beforeunload', onBeforeUnload);
+      }
+      registeredLocks.add(id);
+  }
+  function disableNavigationPrompt(id) {
+      registeredLocks.delete(id);
+      if (registeredLocks.size === 0) {
+          window.removeEventListener('beforeunload', onBeforeUnload);
+      }
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
+  async function getNextChunk(data, position, nextChunkSize) {
+      if (data instanceof Blob) {
+          return await getChunkFromBlob(data, position, nextChunkSize);
+      }
+      else {
+          return getChunkFromArrayBufferView(data, position, nextChunkSize);
+      }
+  }
+  async function getChunkFromBlob(data, position, nextChunkSize) {
+      const chunkBlob = data.slice(position, position + nextChunkSize);
+      const arrayBuffer = await chunkBlob.arrayBuffer();
+      const nextChunkData = new Uint8Array(arrayBuffer);
+      return nextChunkData;
+  }
+  function getChunkFromArrayBufferView(data, position, nextChunkSize) {
+      const nextChunkData = new Uint8Array(data.buffer, data.byteOffset + position, nextChunkSize);
+      return nextChunkData;
+  }
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
+  const Blazor = {
+      navigateTo,
+      registerCustomEventType,
+      rootComponents: RootComponentsFunctions,
+      runtime: {},
+      _internal: {
+          navigationManager: internalFunctions,
+          domWrapper: domFunctions,
+          Virtualize,
+          PageTitle,
+          InputFile,
+          NavigationLock,
+          getJSDataStreamChunk: getNextChunk,
+          attachWebRendererInterop,
+      },
+  };
+  // Make the following APIs available in global scope for invocation from JS
+  window['Blazor'] = Blazor;
+
+  // Licensed to the .NET Foundation under one or more agreements.
+  // The .NET Foundation licenses this file to you under the MIT license.
   let requestId = "";
   const commentNodes = document.getRootNode().childNodes;
   for (let i = commentNodes.length - 1; i >= 0; i--) {
@@ -2414,9 +3204,18 @@
   function boot() {
       const initScript = document.getElementById('blazor-initialization');
       if (initScript) {
+          debugger;
           // @ts-ignore
           const serializedRenderBatch = initScript.textContent.trim();
           initScript.remove();
+          Blazor._internal.navigationManager.enableNavigationInterception(WebRendererId.Server);
+          Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.Server, (uri, state, intercepted) => {
+              console.log("locationChanged", uri, state, intercepted);
+              return locationChanged(uri);
+          }, (callId, uri, state, intercepted) => {
+              console.log("locationChanging", callId, uri, state, intercepted);
+              return new Promise((resolve, reject) => { });
+          });
           const documentRoot = document.getRootNode();
           const html = documentRoot.children[0];
           const fragment = document.createDocumentFragment();
@@ -2435,7 +3234,7 @@
               invokeMethodAsync: invokeMethodAsyncLightMode,
               // ... include other necessary methods
           };
-          attachWebRendererInterop(WebRendererId.Server, interopMethods);
+          attachWebRendererInterop(WebRendererId.Server, interopMethods, undefined, undefined);
       }
   }
   window['DotNet'] = DotNet;
@@ -2454,7 +3253,7 @@
       // post to /dynamic/invokeMethodAsync with body as "struct InvokeMethodArgs(string RequestId, string? AssemblyName, string MethodIdentifier, int ObjectReference, JsonElement[] Arguments)"
       // return the response as a promise
       return new Promise((resolve, reject) => {
-          fetch(`invokeMethodAsync`, {
+          fetch(`_invokeMethodAsync`, {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json'
@@ -2474,6 +3273,29 @@
               }
           }).catch(error => {
               console.error("invokeMethodAsyncLightMode error", error);
+              reject(error);
+          });
+      });
+  }
+  function locationChanged(uri, intercepted) {
+      return new Promise((resolve, reject) => {
+          fetch(`_locationChanged`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                  RequestId: requestId,
+                  Location: uri,
+              })
+          }).then(async (response) => {
+              const responseBody = await response.json();
+              console.log("locationChanged response", responseBody);
+              for (const batch of responseBody.serializedRenderBatches) {
+                  renderBatchLightMode(batch);
+              }
+          }).catch(error => {
+              console.error("locationChanged error", error);
               reject(error);
           });
       });

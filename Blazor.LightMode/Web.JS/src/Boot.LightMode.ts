@@ -8,6 +8,7 @@ import {toLogicalElement} from "./Rendering/LogicalElements";
 import {attachWebRendererInterop} from "./Rendering/WebRendererInteropMethods";
 import {DotNet} from "@microsoft/dotnet-js-interop";
 import DotNetObject = DotNet.DotNetObject;
+import {Blazor} from "./GlobalExports";
 
 let requestId = "";
 
@@ -25,9 +26,19 @@ function boot() {
     const initScript = document.getElementById('blazor-initialization');
 
     if (initScript) {
+        debugger;
         // @ts-ignore
         const serializedRenderBatch = initScript.textContent.trim();
         initScript.remove();
+
+        Blazor._internal.navigationManager.enableNavigationInterception(WebRendererId.Server);
+        Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.Server, (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+            console.log("locationChanged", uri, state, intercepted);
+            return locationChanged(uri, intercepted); 
+        }, (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+            console.log("locationChanging", callId, uri, state, intercepted);
+            return new Promise<void>((resolve, reject) => {});
+        });
 
         const documentRoot = document.getRootNode();
         const html = (documentRoot as Element).children[0];
@@ -75,7 +86,7 @@ function invokeMethodAsyncLightMode<T>(methodIdentifier: string, ...args: any[])
     // return the response as a promise
 
     return new Promise<T>((resolve, reject) => {
-        fetch(`invokeMethodAsync`, {
+        fetch(`_invokeMethodAsync`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -98,7 +109,30 @@ function invokeMethodAsyncLightMode<T>(methodIdentifier: string, ...args: any[])
             reject(error);
         });
     });
+}
 
+function locationChanged(uri: string, intercepted: boolean): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        fetch(`_locationChanged`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                RequestId: requestId,
+                Location: uri,
+            })
+        }).then(async response => {
+            const responseBody = await response.json() as LightModeResponse;
+            console.log("locationChanged response", responseBody);
+            for (const batch of responseBody.serializedRenderBatches) {
+                renderBatchLightMode(batch);
+            }
+        }).catch(error => {
+            console.error("locationChanged error", error);
+            reject(error);
+        });
+    });
 }
 
 function base64ToUint8Array(base64: string) {

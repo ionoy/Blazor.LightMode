@@ -3,20 +3,21 @@ using Microsoft.AspNetCore.Components.Routing;
 
 namespace Blazor.LightMode;
 
-public class LightModeNavigationManager : NavigationManager, IHostEnvironmentNavigationManager
+public class LightModeNavigationManager : NavigationManager
 {
-    private string _baseUri;
-    
-    void IHostEnvironmentNavigationManager.Initialize(string baseUri, string uri)
-    {
-        Initialize(baseUri, uri);
-    }
+    private string? _baseUri;
     
     public new void Initialize(string baseUri, string uri)
     {
         _baseUri = baseUri;
         
         base.Initialize(baseUri, uri);
+        NotifyLocationChanged(isInterceptedLink: false);
+    }
+
+    public void NotifyLocationChanged(string location)
+    {
+        Uri = location;
         NotifyLocationChanged(isInterceptedLink: false);
     }
 

@@ -29,8 +29,14 @@ app.MapGet("/", async (HttpContext context, [FromServices]LightModeCircuitHost h
     await host.StartRequest<App>(context);
 });
 
-app.MapPost("/invokeMethodAsync", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]InvokeMethodArgs args) => {
+app.MapPost("/_invokeMethodAsync", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]InvokeMethodArgs args) => {
     var response = await host.InvokeMethodAsync(args.RequestId, args.AssemblyName, args.MethodIdentifier, args.ObjectReference, args.Arguments);
+    
+    await context.Response.WriteAsJsonAsync(response);
+});
+
+app.MapPost("/_locationChanged", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]LocationChangedArgs args) => {
+    var response = await host.LocationChangedAsync(args.RequestId, args.Location);
     
     await context.Response.WriteAsJsonAsync(response);
 });

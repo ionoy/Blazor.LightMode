@@ -24,8 +24,8 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
     {
         var circuit = CreateCircuit(context);
         var navigationManager = (LightModeNavigationManager)circuit.Services.GetRequiredService<NavigationManager>();
-        var baseUri = context.Request.Host.ToUriComponent();
-        var fullUri = context.Request.GetDisplayUrl().Replace("https://", "").TrimEnd('/');
+        var baseUri = GetBaseUri(context.Request);
+        var fullUri = GetFullUri(context.Request);
         
         navigationManager.Initialize(baseUri, fullUri);
         
@@ -38,5 +38,31 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
             return circuit.InvokeMethodAsync(assemblyName, methodIdentifier, objectReference, arguments);
         
         return Task.FromResult(new LightModeResponse(Array.Empty<string>()));
+    }
+    private static string GetBaseUri(HttpRequest request)
+    {
+        var result = UriHelper.BuildAbsolute(request.Scheme, request.Host, request.PathBase);
+
+        // PathBase may be "/" or "/some/thing", but to be a well-formed base URI
+        // it has to end with a trailing slash
+        return result.EndsWith('/') ? result : result += "/";
+    }
+
+    private static string GetFullUri(HttpRequest request)
+    {
+        return UriHelper.BuildAbsolute(
+            request.Scheme,
+            request.Host,
+            request.PathBase,
+            request.Path,
+            request.QueryString);
+    }
+
+    public async Task<LightModeResponse> LocationChangedAsync(string requestId, string location)
+    {
+        if (_circuits.TryGetValue(requestId, out var circuit))
+            return await circuit.LocationChangedAsync(location);
+        
+        return new LightModeResponse(Array.Empty<string>());
     }
 }
