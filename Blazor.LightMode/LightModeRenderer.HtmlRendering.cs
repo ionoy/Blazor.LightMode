@@ -182,7 +182,7 @@ public partial class LightModeRenderer
         if (_renderBatchQueue.TryDequeue(out var renderBatch))
         {
             output.Write("<script id='blazor-initialization' type='application/json'>");
-            output.Write(renderBatch.SerializeToBase64());
+            output.Write(renderBatch);
             output.Write("</script>");
         }
     }

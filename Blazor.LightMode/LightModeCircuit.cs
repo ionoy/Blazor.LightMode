@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -55,10 +57,7 @@ public class LightModeCircuit : IDisposable
     
     public async Task<LightModeResponse> LocationChangedAsync(string location)
     {
-        var navigationManager = (LightModeNavigationManager)Services.GetRequiredService<NavigationManager>();
-        await _renderer.Dispatcher.InvokeAsync(() => {
-            navigationManager.NotifyLocationChanged(location);
-        }).ConfigureAwait(false);
+        await _renderer.LocationChanged(location);
         var renderBatches = _renderer.GetSerializedRenderBatches();
         
         return new LightModeResponse(renderBatches);
