@@ -3204,7 +3204,6 @@
   function boot() {
       const initScript = document.getElementById('blazor-initialization');
       if (initScript) {
-          debugger;
           // @ts-ignore
           const serializedRenderBatch = initScript.textContent.trim();
           initScript.remove();
@@ -3235,6 +3234,7 @@
               // ... include other necessary methods
           };
           attachWebRendererInterop(WebRendererId.Server, interopMethods, undefined, undefined);
+          onAfterRender();
       }
   }
   window['DotNet'] = DotNet;

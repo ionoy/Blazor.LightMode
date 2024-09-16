@@ -26,7 +26,6 @@ function boot() {
     const initScript = document.getElementById('blazor-initialization');
 
     if (initScript) {
-        debugger;
         // @ts-ignore
         const serializedRenderBatch = initScript.textContent.trim();
         initScript.remove();
@@ -49,6 +48,7 @@ function boot() {
         attachRootComponentToLogicalElement(WebRendererId.Server, toLogicalElement(fragment, true), 0, false);
 
         renderSerializedRenderBatch(serializedRenderBatch);
+
         let htmlNew = (fragment as unknown as Element).children[0];
         documentRoot.appendChild(htmlNew);
 
@@ -64,6 +64,8 @@ function boot() {
         } as unknown as DotNetObject;
 
         attachWebRendererInterop(WebRendererId.Server, interopMethods, undefined, undefined);
+
+        onAfterRender();
     }
 }
 
