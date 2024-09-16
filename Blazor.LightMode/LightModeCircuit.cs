@@ -27,9 +27,11 @@ public class LightModeCircuit : IDisposable
         _renderer = new LightModeRenderer(_serviceScope.ServiceProvider, _loggerFactory, this);
     }
 
-    public async Task RenderRootComponentAsync<TComponent>(HttpContext context) where TComponent : IComponent
+    public async Task RenderRootComponentAsync<TComponent>(HttpContext context) where TComponent : IComponent => await RenderRootComponentAsync(context, typeof(TComponent)).ConfigureAwait(false);
+
+    public async Task RenderRootComponentAsync(HttpContext context, Type componentType)
     {
-        var component = await _renderer.RenderComponentAsync<TComponent>().ConfigureAwait(false);
+        var component = await _renderer.RenderComponentAsync(componentType).ConfigureAwait(false);
         var htmlString = await _renderer.Dispatcher.InvokeAsync(() => component.ToHtmlString()).ConfigureAwait(false);
         
         await context.Response.WriteAsync($"<!--requestId:{_requestId}-->").ConfigureAwait(false);
@@ -48,12 +50,6 @@ public class LightModeCircuit : IDisposable
         
         return new LightModeResponse(Array.Empty<string>());
     }
-    public void Dispose()
-    {
-        _renderer.Dispose();
-        _serviceScope.Dispose();
-        _loggerFactory.Dispose();
-    }
     
     public async Task<LightModeResponse> LocationChangedAsync(string location)
     {
@@ -61,6 +57,20 @@ public class LightModeCircuit : IDisposable
         var renderBatches = _renderer.GetSerializedRenderBatches();
         
         return new LightModeResponse(renderBatches);
+    }
+    public async Task<LightModeResponse> OnAfterRenderAsync()
+    {
+        await _renderer.OnAfterRender();
+        var renderBatches = _renderer.GetSerializedRenderBatches();
+        
+        return new LightModeResponse(renderBatches);
+    }
+    
+    public void Dispose()
+    {
+        _renderer.Dispose();
+        _serviceScope.Dispose();
+        _loggerFactory.Dispose();
     }
 }
 

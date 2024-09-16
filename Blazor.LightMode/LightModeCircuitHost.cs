@@ -20,7 +20,9 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
         return circuit;
     }
     
-    public async Task StartRequest<TRootComponent>(HttpContext context) where TRootComponent : IComponent
+    public async Task StartRequest<TRootComponent>(HttpContext context) where TRootComponent : IComponent => await StartRequest(context, typeof(TRootComponent));
+
+    public async Task StartRequest(HttpContext context, Type componentType)
     {
         var circuit = CreateCircuit(context);
         var navigationManager = (LightModeNavigationManager)circuit.Services.GetRequiredService<NavigationManager>();
@@ -29,7 +31,7 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
         
         navigationManager.Initialize(baseUri, fullUri);
         
-        await circuit.RenderRootComponentAsync<TRootComponent>(context);
+        await circuit.RenderRootComponentAsync(context, componentType);
     }
     
     public Task<LightModeResponse> InvokeMethodAsync(string requestId, string? assemblyName, string methodIdentifier, int objectReference, JsonElement[] arguments)
@@ -62,6 +64,13 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
     {
         if (_circuits.TryGetValue(requestId, out var circuit))
             return await circuit.LocationChangedAsync(location);
+        
+        return new LightModeResponse(Array.Empty<string>());
+    }
+    public async Task<LightModeResponse> OnAfterRenderAsync(string requestId)
+    {
+        if (_circuits.TryGetValue(requestId, out var circuit))
+            return await circuit.OnAfterRenderAsync();
         
         return new LightModeResponse(Array.Empty<string>());
     }

@@ -1,10 +1,12 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Infrastructure;
@@ -19,12 +21,15 @@ public partial class LightModeRenderer : WebRenderer
     public LightModeJSRuntime JSRuntime { get; } = new();
 
     private readonly ConcurrentQueue<string> _renderBatchQueue = [];
+    private readonly ConcurrentQueue<int> _onAfterRenderQueue = [];
     private readonly LightModeInteropMethods _interopMethods;
     private readonly LightModeNavigationManager _navigationManager;
+    private readonly Dictionary<int,ComponentState> _componentStateById;
 
     private static readonly Task CanceledRenderTask = Task.FromCanceled(new CancellationToken(canceled: true));
     private static readonly FieldInfo PendingTasksField = typeof(Renderer).GetField("_pendingTasks", BindingFlags.NonPublic | BindingFlags.Instance)!;
     private static readonly MethodInfo WaitForQuiescenceMethod = typeof(Renderer).GetMethod("WaitForQuiescence", BindingFlags.NonPublic | BindingFlags.Instance)!;
+    private static readonly FieldInfo ComponentStateByIdField = typeof(Renderer).GetField("_componentStateById", BindingFlags.NonPublic | BindingFlags.Instance)!;
     
     public LightModeRenderer(IServiceProvider serviceProvider, ILoggerFactory loggerFactory, LightModeCircuit circuit) 
         : base(serviceProvider, loggerFactory, new JsonSerializerOptions(), new JSComponentInterop(new JSComponentConfigurationStore() {}))
@@ -33,6 +38,7 @@ public partial class LightModeRenderer : WebRenderer
         _htmlEncoder = serviceProvider.GetService<HtmlEncoder>() ?? HtmlEncoder.Default;
         _javaScriptEncoder = serviceProvider.GetService<JavaScriptEncoder>() ?? JavaScriptEncoder.Default;
         _interopMethods = new LightModeInteropMethods(this);
+        _componentStateById = (Dictionary<int,ComponentState>)ComponentStateByIdField.GetValue(this)!;
     }
     
     public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
@@ -41,6 +47,15 @@ public partial class LightModeRenderer : WebRenderer
     {
         return Dispatcher.InvokeAsync(async () => {
             var content = BeginRenderingComponent(typeof(TComponent), ParameterView.Empty);
+            await content.QuiescenceTask;
+            return content;
+        });
+    }
+    
+    public Task<LightModeRootComponent> RenderComponentAsync(Type componentType)
+    {
+        return Dispatcher.InvokeAsync(async () => {
+            var content = BeginRenderingComponent(componentType, ParameterView.Empty);
             await content.QuiescenceTask;
             return content;
         });
@@ -70,7 +85,6 @@ public partial class LightModeRenderer : WebRenderer
     }
     
     protected override void AttachRootComponentToBrowser(int componentId, string domElementSelector) => Console.WriteLine($"Attaching component {componentId} to {domElementSelector}");
-
     protected override IComponent ResolveComponentForRenderMode(Type componentType, int? parentComponentId, IComponentActivator componentActivator, IComponentRenderMode renderMode)
         => componentActivator.CreateInstance(componentType);
     
@@ -91,13 +105,6 @@ public partial class LightModeRenderer : WebRenderer
             batches.Add(batch);
         return batches;
     }
-    
-    private void MakeSurePendingTasksNotNull()
-    {
-        if (PendingTasksField.GetValue(this) is null)
-            PendingTasksField.SetValue(this, new List<Task>());
-    }
-
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
     {
         using var memoryStream = new MemoryStream();
@@ -107,6 +114,9 @@ public partial class LightModeRenderer : WebRenderer
         var base64 = Convert.ToBase64String(memoryStream.ToArray());
         _renderBatchQueue.Enqueue(base64);
         MakeSurePendingTasksNotNull();
+
+        foreach (var diff in renderBatch.UpdatedComponents.Array)
+            _onAfterRenderQueue.Enqueue(diff.ComponentId);
         
         return CanceledRenderTask;
     }
@@ -116,8 +126,34 @@ public partial class LightModeRenderer : WebRenderer
         await Dispatcher.InvokeAsync(async () => {
             MakeSurePendingTasksNotNull();
             _navigationManager.NotifyLocationChanged(location);
-            await (Task)WaitForQuiescenceMethod.Invoke(this, [])!;
         }).ConfigureAwait(false);
+    }
+    
+    public async Task OnAfterRender()
+    {
+        await Dispatcher.InvokeAsync(async () => {
+            MakeSurePendingTasksNotNull();
+            
+            await WaitForQuiescence();
+
+            while (_onAfterRenderQueue.TryDequeue(out var componentId))
+                if (_componentStateById.TryGetValue(componentId, out var componentState) && componentState is IHandleAfterRender handleAfterRender)
+                    await handleAfterRender.OnAfterRenderAsync();
+            
+            await WaitForQuiescence();
+        }).ConfigureAwait(false);
+    }
+    
+    private async Task WaitForQuiescence()
+    {
+        await (Task) WaitForQuiescenceMethod.Invoke(this, [])!;
+        MakeSurePendingTasksNotNull();
+    }
+    
+    private void MakeSurePendingTasksNotNull()
+    {
+        if (PendingTasksField.GetValue(this) is null)
+            PendingTasksField.SetValue(this, new List<Task>());
     }
 }
 

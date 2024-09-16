@@ -3221,7 +3221,7 @@
           const fragment = document.createDocumentFragment();
           fragment.appendChild(html);
           attachRootComponentToLogicalElement(WebRendererId.Server, toLogicalElement(fragment, true), 0, false);
-          renderBatchLightMode(serializedRenderBatch);
+          renderSerializedRenderBatch(serializedRenderBatch);
           let htmlNew = fragment.children[0];
           documentRoot.appendChild(htmlNew);
           const interopMethods = {
@@ -3241,7 +3241,7 @@
   document.addEventListener("DOMContentLoaded", function (event) {
       boot();
   });
-  function renderBatchLightMode(serializedRenderBatch) {
+  function renderSerializedRenderBatch(serializedRenderBatch) {
       const binaryBatch = base64ToUint8Array(serializedRenderBatch);
       renderBatch(WebRendererId.Server, new OutOfProcessRenderBatch(binaryBatch));
   }
@@ -3250,8 +3250,6 @@
       return null;
   }
   function invokeMethodAsyncLightMode(methodIdentifier, ...args) {
-      // post to /dynamic/invokeMethodAsync with body as "struct InvokeMethodArgs(string RequestId, string? AssemblyName, string MethodIdentifier, int ObjectReference, JsonElement[] Arguments)"
-      // return the response as a promise
       return new Promise((resolve, reject) => {
           fetch(`_invokeMethodAsync`, {
               method: 'POST',
@@ -3268,9 +3266,7 @@
           }).then(async (response) => {
               const responseBody = await response.json();
               console.log("invokeMethodAsyncLightMode response", responseBody);
-              for (const batch of responseBody.serializedRenderBatches) {
-                  renderBatchLightMode(batch);
-              }
+              await renderBatches(responseBody.serializedRenderBatches);
           }).catch(error => {
               console.error("invokeMethodAsyncLightMode error", error);
               reject(error);
@@ -3291,14 +3287,38 @@
           }).then(async (response) => {
               const responseBody = await response.json();
               console.log("locationChanged response", responseBody);
-              for (const batch of responseBody.serializedRenderBatches) {
-                  renderBatchLightMode(batch);
-              }
+              await renderBatches(responseBody.serializedRenderBatches);
           }).catch(error => {
               console.error("locationChanged error", error);
               reject(error);
           });
       });
+  }
+  function onAfterRender() {
+      return new Promise((resolve, reject) => {
+          fetch(`_onAfterRender`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                  RequestId: requestId
+              })
+          }).then(async (response) => {
+              const responseBody = await response.json();
+              console.log("onAfterRender response", responseBody);
+              await renderBatches(responseBody.serializedRenderBatches);
+          }).catch(error => {
+              console.error("onAfterRender error", error);
+              reject(error);
+          });
+      });
+  }
+  async function renderBatches(serializedRenderBatches) {
+      for (const batch of serializedRenderBatches)
+          renderSerializedRenderBatch(batch);
+      if (serializedRenderBatches.length > 0)
+          await onAfterRender();
   }
   function base64ToUint8Array(base64) {
       const binaryString = atob(base64);

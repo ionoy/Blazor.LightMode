@@ -48,7 +48,7 @@ function boot() {
 
         attachRootComponentToLogicalElement(WebRendererId.Server, toLogicalElement(fragment, true), 0, false);
 
-        renderBatchLightMode(serializedRenderBatch);
+        renderSerializedRenderBatch(serializedRenderBatch);
         let htmlNew = (fragment as unknown as Element).children[0];
         documentRoot.appendChild(htmlNew);
 
@@ -72,7 +72,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
     boot();
 });
 
-function renderBatchLightMode(serializedRenderBatch: string) {
+function renderSerializedRenderBatch(serializedRenderBatch: string) {
     const binaryBatch = base64ToUint8Array(serializedRenderBatch);
     renderBatch(WebRendererId.Server, new OutOfProcessRenderBatch(binaryBatch));
 }
@@ -82,9 +82,6 @@ function invokeMethodLightMode<T>(methodIdentifier: string, ...args: any[]): T {
     return null as T;
 }
 function invokeMethodAsyncLightMode<T>(methodIdentifier: string, ...args: any[]): Promise<T> {
-    // post to /dynamic/invokeMethodAsync with body as "struct InvokeMethodArgs(string RequestId, string? AssemblyName, string MethodIdentifier, int ObjectReference, JsonElement[] Arguments)"
-    // return the response as a promise
-
     return new Promise<T>((resolve, reject) => {
         fetch(`_invokeMethodAsync`, {
             method: 'POST',
@@ -101,9 +98,7 @@ function invokeMethodAsyncLightMode<T>(methodIdentifier: string, ...args: any[])
         }).then(async response => {
             const responseBody = await response.json() as LightModeResponse;
             console.log("invokeMethodAsyncLightMode response", responseBody);
-            for (const batch of responseBody.serializedRenderBatches) {
-                renderBatchLightMode(batch);
-            }
+            await renderBatches(responseBody.serializedRenderBatches);
         }).catch(error => {
             console.error("invokeMethodAsyncLightMode error", error);
             reject(error);
@@ -125,9 +120,7 @@ function locationChanged(uri: string, intercepted: boolean): Promise<void> {
         }).then(async response => {
             const responseBody = await response.json() as LightModeResponse;
             console.log("locationChanged response", responseBody);
-            for (const batch of responseBody.serializedRenderBatches) {
-                renderBatchLightMode(batch);
-            }
+            await renderBatches(responseBody.serializedRenderBatches);
         }).catch(error => {
             console.error("locationChanged error", error);
             reject(error);
@@ -135,6 +128,34 @@ function locationChanged(uri: string, intercepted: boolean): Promise<void> {
     });
 }
 
+function onAfterRender(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+        fetch(`_onAfterRender`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                RequestId: requestId
+            })
+        }).then(async response => {
+            const responseBody = await response.json() as LightModeResponse;
+            console.log("onAfterRender response", responseBody);
+            await renderBatches(responseBody.serializedRenderBatches);
+        }).catch(error => {
+            console.error("onAfterRender error", error);
+            reject(error);
+        });
+    });
+}
+
+async function renderBatches(serializedRenderBatches: string[]) {
+    for (const batch of serializedRenderBatches)
+        renderSerializedRenderBatch(batch);
+
+    if (serializedRenderBatches.length > 0)
+        await onAfterRender();
+}
 function base64ToUint8Array(base64: string) {
     const binaryString = atob(base64);
     const binaryLength = binaryString.length;
@@ -145,7 +166,6 @@ function base64ToUint8Array(base64: string) {
     return binaryBatch;
 }
 
-// record LightModeResponse(IReadOnlyList<string> SerializedRenderBatches);
 interface LightModeResponse {
     serializedRenderBatches: string[];
 }
