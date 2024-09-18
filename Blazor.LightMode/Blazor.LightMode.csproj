@@ -12,4 +12,8 @@
         <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.8"/>
     </ItemGroup>
 
+    <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+      <Exec Command="npm run build" WorkingDirectory="Web.JS" />
+    </Target>
+
 </Project>

@@ -1,19 +1,57 @@
 ﻿@page "/counter"
 @rendermode InteractiveServer
 
-<PageTitle>Counter</PageTitle>
+@inject JSRuntime JSRuntime
 
-<h1>Counter</h1>
+@* <PageTitle>Counter</PageTitle> *@
+<HeadContent>
+    <title>Counter</title>
+</HeadContent>
+
+<h1 @ref="_counterHeader">Counter</h1>
 
 <p role="status">Current count: @currentCount</p>
-
+<p>@_progressiveUpdate</p>
 <button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+<button class="btn btn-primary" @onclick="ShowAlert">Show alert</button>
+<button class="btn btn-primary" @onclick="ToggleCounterHeader">Toggle counter header</button>
+<button class="btn btn-primary" @onclick="ProgressiveUpdates">Progressive updates</button>
 
 @code {
     private int currentCount = 0;
+    private int _progressiveUpdate = 0;
+    private ElementReference _counterHeader;
+
+    protected override async Task OnInitializedAsync()
+    {
+        
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await JSRuntime.InvokeVoidAsync("eval", "changeTitle = (element) => {element.innerText = 'Counter (changed from JavaScript)';}");
+    }
 
     private void IncrementCount()
     {
         currentCount++;
+    }
+    
+    private void ShowAlert()
+    {
+        JSRuntime.InvokeVoidAsync("alert", "Hello from Blazor");
+    }
+    private void ToggleCounterHeader()
+    {
+        JSRuntime.InvokeVoidAsync("changeTitle", _counterHeader);
+    }
+    private async Task ProgressiveUpdates()
+    {
+        for (var i = 0; i < 10; i++)
+        {
+            _progressiveUpdate++;
+            StateHasChanged();
+            await Task.Delay(1000);
+        }
     }
 }

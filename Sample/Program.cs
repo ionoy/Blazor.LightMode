@@ -2,7 +2,10 @@ using Blazor.LightMode;
 using Sample.Components;
 
 var builder = WebApplication.CreateBuilder(args);
-
+builder.Services.AddLogging(options =>
+{
+    options.AddSimpleConsole(c => c.SingleLine = true);
+});
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

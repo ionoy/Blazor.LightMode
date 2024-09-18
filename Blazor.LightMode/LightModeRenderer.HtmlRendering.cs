@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.RenderTree;
@@ -179,12 +180,10 @@ public partial class LightModeRenderer
     }
     private void InsertInitialBatchScript(TextWriter output)
     {
-        if (_renderBatchQueue.TryDequeue(out var renderBatch))
-        {
-            output.Write("<script id='blazor-initialization' type='application/json'>");
-            output.Write(renderBatch);
-            output.Write("</script>");
-        }
+        var response = CreateLightModeResponse();
+        output.Write("<script id='blazor-initialization' type='application/json'>");
+        output.Write(JsonSerializer.Serialize(response, _jsRuntime.JsonSerializerOptions));
+        output.Write("</script>");
     }
 
     private int RenderScriptElementChildren(int componentId, TextWriter output, ArrayRange<RenderTreeFrame> frames, int position, int maxElements)

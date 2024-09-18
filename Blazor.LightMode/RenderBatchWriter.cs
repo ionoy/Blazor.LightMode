@@ -1,24 +1,23 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Microsoft.AspNetCore.Components.RenderTree;
+using Microsoft.JSInterop;
 
 namespace Blazor.LightMode;
 
 [SuppressMessage("Usage", "BL0006:Do not use RenderTree types")]
-internal sealed class RenderBatchCloneWriter : IDisposable
+internal sealed class RenderBatchWriter : IDisposable
 {
-    private readonly List<string> _strings;
-    private readonly Dictionary<string, int> _deduplicatedStringIndices;
+    private readonly List<string> _strings = new();
+    private readonly Dictionary<string, int> _deduplicatedStringIndices = new();
     private readonly BinaryWriter _binaryWriter;
 
-    public RenderBatchCloneWriter(Stream output, bool leaveOpen)
+    public RenderBatchWriter(Stream output, bool leaveOpen)
     {
-        _strings = new List<string>();
-        _deduplicatedStringIndices = new Dictionary<string, int>();
         _binaryWriter = new BinaryWriter(output, Encoding.UTF8, leaveOpen);
     }
 
-    public void Write(RenderBatchClone renderBatch)
+    public void Write(in RenderBatch renderBatch)
     {
         var updatedComponentsOffset = Write(renderBatch.UpdatedComponents);
         var referenceFramesOffset = Write(renderBatch.ReferenceFrames);
@@ -33,26 +32,22 @@ internal sealed class RenderBatchCloneWriter : IDisposable
         _binaryWriter.Write(stringTableOffset);
     }
 
-    int Write(in ArrayRange<RenderTreeDiffClone> diffs)
+    int Write(in ArrayRange<RenderTreeDiff> diffs)
     {
         var count = diffs.Count;
-        var diffsIndexes = new List<int>();
-        var diffsArray = diffs.Array;
+        var diffsIndexes = new int[count];
+        var array = diffs.Array;
         var baseStream = _binaryWriter.BaseStream;
-        
         for (var i = 0; i < count; i++)
         {
-            // if (diffsArray[i].ComponentId == 0)
-            //     continue;
-            
-            diffsIndexes.Add((int)baseStream.Position);
-            Write(diffsArray[i]);
+            diffsIndexes[i] = (int)baseStream.Position;
+            Write(array[i]);
         }
 
         // Now write out the table of locations
         var tableStartPos = (int)baseStream.Position;
-        _binaryWriter.Write(diffsIndexes.Count);
-        for (var i = 0; i < diffsIndexes.Count; i++)
+        _binaryWriter.Write(count);
+        for (var i = 0; i < count; i++)
         {
             _binaryWriter.Write(diffsIndexes[i]);
         }
@@ -60,7 +55,7 @@ internal sealed class RenderBatchCloneWriter : IDisposable
         return tableStartPos;
     }
 
-    void Write(in RenderTreeDiffClone diff)
+    void Write(in RenderTreeDiff diff)
     {
         _binaryWriter.Write(diff.ComponentId);
 
@@ -68,8 +63,8 @@ internal sealed class RenderBatchCloneWriter : IDisposable
         _binaryWriter.Write(edits.Count);
 
         var editsArray = edits.Array;
-        var editsEndIndexExcl = edits.Count;
-        for (var i = 0; i < editsEndIndexExcl; i++)
+        var editsEndIndexExcl = edits.Offset + edits.Count;
+        for (var i = edits.Offset; i < editsEndIndexExcl; i++)
         {
             Write(editsArray[i]);
         }
@@ -244,9 +239,6 @@ internal sealed class RenderBatchCloneWriter : IDisposable
         for (var i = 0; i < stringsCount; i++)
         {
             var stringValue = _strings[i];
-            
-            if (stringValue == "Test button")
-                stringValue = "Test button updated";
             locations[i] = (int)_binaryWriter.BaseStream.Position;
             _binaryWriter.Write(stringValue);
         }

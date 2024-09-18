@@ -33,14 +33,6 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
         
         await circuit.RenderRootComponentAsync(context, componentType);
     }
-    
-    public Task<LightModeResponse> InvokeMethodAsync(string requestId, string? assemblyName, string methodIdentifier, int objectReference, JsonElement[] arguments)
-    {
-        if (_circuits.TryGetValue(requestId, out var circuit))
-            return circuit.InvokeMethodAsync(assemblyName, methodIdentifier, objectReference, arguments);
-        
-        return Task.FromResult(new LightModeResponse(Array.Empty<string>()));
-    }
     private static string GetBaseUri(HttpRequest request)
     {
         var result = UriHelper.BuildAbsolute(request.Scheme, request.Host, request.PathBase);
@@ -59,19 +51,34 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
             request.Path,
             request.QueryString);
     }
+    
+    public async Task<LightModeResponse?> InvokeMethodAsync(string requestId, string? assemblyName, string methodIdentifier, int objectReference, JsonElement[] arguments)
+    {
+        if (_circuits.TryGetValue(requestId, out var circuit))
+            return await circuit.InvokeMethodAsync(assemblyName, methodIdentifier, objectReference, arguments);
+        
+        return null;
+    }
 
-    public async Task<LightModeResponse> LocationChangedAsync(string requestId, string location)
+    public async Task<LightModeResponse?> LocationChangedAsync(string requestId, string location)
     {
         if (_circuits.TryGetValue(requestId, out var circuit))
             return await circuit.LocationChangedAsync(location);
         
-        return new LightModeResponse(Array.Empty<string>());
+        return null;
     }
-    public async Task<LightModeResponse> OnAfterRenderAsync(string requestId)
+    public async Task<LightModeResponse?> OnAfterRenderAsync(string requestId)
     {
         if (_circuits.TryGetValue(requestId, out var circuit))
             return await circuit.OnAfterRenderAsync();
         
-        return new LightModeResponse(Array.Empty<string>());
+        return null;
+    }
+    public async Task<LightModeResponse?> EndInvokeJSFromDotNet(string requestId, int? asyncHandle, bool success, string result)
+    {
+        if (_circuits.TryGetValue(requestId, out var circuit))
+            return await circuit.EndInvokeJSFromDotNet(asyncHandle, success, result);
+        
+        return null;
     }
 }
