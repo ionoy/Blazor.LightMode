@@ -52,7 +52,7 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
             request.QueryString);
     }
     
-    public async Task<LightModeResponse?> InvokeMethodAsync(string requestId, string? assemblyName, string methodIdentifier, int objectReference, JsonElement[] arguments)
+    public async Task<LightModeResponse?> InvokeMethod(string requestId, string? assemblyName, string methodIdentifier, int objectReference, JsonElement[] arguments)
     {
         if (_circuits.TryGetValue(requestId, out var circuit))
             return await circuit.InvokeMethodAsync(assemblyName, methodIdentifier, objectReference, arguments);
@@ -60,17 +60,17 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
         return null;
     }
 
-    public async Task<LightModeResponse?> LocationChangedAsync(string requestId, string location)
+    public async Task<LightModeResponse?> LocationChanged(string requestId, string location)
     {
         if (_circuits.TryGetValue(requestId, out var circuit))
-            return await circuit.LocationChangedAsync(location);
+            return await circuit.LocationChanged(location);
         
         return null;
     }
-    public async Task<LightModeResponse?> OnAfterRenderAsync(string requestId)
+    public async Task<LightModeResponse?> OnAfterRender(string requestId)
     {
         if (_circuits.TryGetValue(requestId, out var circuit))
-            return await circuit.OnAfterRenderAsync();
+            return await circuit.OnAfterRender();
         
         return null;
     }
@@ -78,6 +78,13 @@ public class LightModeCircuitHost(ILoggerFactory loggerFactory)
     {
         if (_circuits.TryGetValue(requestId, out var circuit))
             return await circuit.EndInvokeJSFromDotNet(asyncHandle, success, result);
+        
+        return null;
+    }
+    public async Task<LightModeResponse?> WaitForRender(string requestId)
+    {
+        if (_circuits.TryGetValue(requestId, out var circuit))
+            return await circuit.WaitForRender();
         
         return null;
     }

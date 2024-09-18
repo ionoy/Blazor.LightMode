@@ -46,7 +46,7 @@ public class LightModeJSRuntime : JSRuntime
         //     return;
         // }
         
-        Renderer?.TryForceRender();
+        Renderer?.RendererEvents.NotifyJSCall();
     }
     
     protected override void EndInvokeDotNet(DotNetInvocationInfo invocationInfo, in DotNetInvocationResult invocationResult)

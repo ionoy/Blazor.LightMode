@@ -121,6 +121,12 @@ function onAfterRender(): Promise<void> {
     });
 }
 
+function waitForRender(): Promise<void> {
+    return circuitFetch(`_waitForRender`, {
+        RequestId: requestId,
+    });
+}
+
 function endInvokeJSFromDotNet(identifier: string, asyncHandle: number, success: boolean, result: string): Promise<void> {
     console.log("endInvokeJSFromDotNet", identifier, asyncHandle, success, result);
     return circuitFetch(`_endInvokeJSFromDotNet`, {
@@ -159,8 +165,11 @@ async function handleResponse(response: LightModeResponse) {
     for (const invokeJsInfo of response.invokeJsInfos)
         beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId);        
 
-    if (response.serializedRenderBatches.length > 0 || !response.renderCompleted)
+    if (response.serializedRenderBatches.length > 0)
         await onAfterRender();
+    
+    if (!response.renderCompleted)
+        await waitForRender();
 }
 
 function base64ToUint8Array(base64: string) {

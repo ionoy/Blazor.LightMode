@@ -3279,6 +3279,11 @@
           RequestId: requestId,
       });
   }
+  function waitForRender() {
+      return circuitFetch(`_waitForRender`, {
+          RequestId: requestId,
+      });
+  }
   function endInvokeJSFromDotNet(identifier, asyncHandle, success, result) {
       console.log("endInvokeJSFromDotNet", identifier, asyncHandle, success, result);
       return circuitFetch(`_endInvokeJSFromDotNet`, {
@@ -3312,8 +3317,10 @@
           renderSerializedRenderBatch(batch);
       for (const invokeJsInfo of response.invokeJsInfos)
           beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId);
-      if (response.serializedRenderBatches.length > 0 || !response.renderCompleted)
+      if (response.serializedRenderBatches.length > 0)
           await onAfterRender();
+      if (!response.renderCompleted)
+          await waitForRender();
   }
   function base64ToUint8Array(base64) {
       const binaryString = atob(base64);
