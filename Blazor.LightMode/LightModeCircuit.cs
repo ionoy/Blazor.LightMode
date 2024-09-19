@@ -13,6 +13,8 @@ namespace Blazor.LightMode;
 [SuppressMessage("Usage", "BL0006:Do not use RenderTree types")]
 public class LightModeCircuit : IDisposable
 {
+    record EventDescriptor(ulong EventHandlerId, string EventName, EventFieldInfo? EventFieldInfo);
+    
     private readonly LightModeRenderer _renderer;
     private readonly IServiceScope _serviceScope;
     private readonly string _requestId;
@@ -121,7 +123,6 @@ public async Task<LightModeResponse> InvokeMethodAsync(string? assemblyName, str
         var taskId = NextTaskId();
         _logger.LogDebug("{TaskId} Waiting for render", taskId);
         await _renderer.RendererEvents.WaitFor(EventKind.JSCall | EventKind.RenderBatchReceived).ConfigureAwait(false);
-        
         return await InvokeAsync(_ => {}, taskId);
     }
     
@@ -185,13 +186,12 @@ public async Task<LightModeResponse> InvokeMethodAsync(string? assemblyName, str
             _renderer.RendererEvents.PopTask(taskId);
         }
     }
-
+    
     public void Dispose()
     {
+        _logger.LogDebug("Disposing circuit {RequestId}", _requestId);
+        
         _renderer.Dispose();
         _serviceScope.Dispose();
-        _loggerFactory.Dispose();
     }
-
-    record EventDescriptor(ulong EventHandlerId, string EventName, EventFieldInfo? EventFieldInfo);
 }

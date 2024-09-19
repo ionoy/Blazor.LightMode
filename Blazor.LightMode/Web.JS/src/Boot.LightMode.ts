@@ -87,6 +87,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
     boot();
 });
 
+
 function renderSerializedRenderBatch(serializedRenderBatch: string) {
     const binaryBatch = base64ToUint8Array(serializedRenderBatch);
     renderBatch(WebRendererId.Server, new OutOfProcessRenderBatch(binaryBatch));
@@ -146,14 +147,19 @@ function circuitFetch(uri: string, body: any): Promise<void> {
             },
             body: JSON.stringify(body)
         }).then(async response => {
+            if (response.status === 404) {
+                location.reload();
+                return;
+            }
             let lightModeResponse = await response.json() as LightModeResponse;
             await handleResponse(lightModeResponse);
         }).catch(error => {
-            console.error(uri + " error", error);
+            console.error(uri + " error", error);                        
             reject(error);
         });
     });
 }
+
 
 async function handleResponse(response: LightModeResponse) {
     console.log("Handling response", response);
@@ -181,7 +187,6 @@ function base64ToUint8Array(base64: string) {
     return binaryBatch;
 }
 
-
 function beginInvokeJSFromDotNet(asyncHandle: number, identifier: string, argsJson: string | null, resultType: DotNet.JSCallResultType, targetInstanceId: number): void {
     // Coerce synchronous functions into async ones, plus treat
     // synchronous exceptions the same as async ones
@@ -194,18 +199,18 @@ function beginInvokeJSFromDotNet(asyncHandle: number, identifier: string, argsJs
 
     // We only listen for a result if the caller wants to be notified about it
     if (asyncHandle) {
-        // On completion, dispatch result back to .NET
-        // Not using "await" because it codegens a lot of boilerplate
-        promise.
-        then(
+        promise.then(
             result => endInvokeJSFromDotNet(identifier, asyncHandle, true, JSON.stringify(createJSCallResult(result, resultType))),
             error => {
-                console.error(error);
-                
+                console.error(error);                
                 return endInvokeJSFromDotNet(identifier, asyncHandle, false, JSON.stringify([asyncHandle, false, (error)]));
             }
         );
     }
+}
+
+function heartbeat() {
+    navigator.sendBeacon("_heartbeat", JSON.stringify({ RequestId: requestId }));
 }
 
 function createJSCallResult(returnValue: any, resultType: JSCallResultType) {

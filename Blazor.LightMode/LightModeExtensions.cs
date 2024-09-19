@@ -15,7 +15,12 @@ public static class LightModeExtensions
     public static void AddLightMode(this IServiceCollection services)
     {
         services.Replace(new ServiceDescriptor(typeof(NavigationManager), typeof(LightModeNavigationManager), ServiceLifetime.Scoped));
+        
         services.AddSingleton<LightModeCircuitHost>();
+        services.AddSingleton<ILightModeCircuitManager, DefaultLightModeCircuitManager>();
+        
+        services.AddHostedService(sp => sp.GetRequiredService<ILightModeCircuitManager>());
+        
         services.AddScoped<LightModeRendererEvents>();
         services.AddScoped<IRazorComponentEndpointInvoker, LightModeEndpointInvoker>();
         services.AddScoped<LightModeJSRuntime>();
@@ -63,3 +68,4 @@ public static class LightModeExtensions
         });
     }
 }
+

@@ -3302,6 +3302,10 @@
               },
               body: JSON.stringify(body)
           }).then(async (response) => {
+              if (response.status === 404) {
+                  location.reload();
+                  return;
+              }
               let lightModeResponse = await response.json();
               await handleResponse(lightModeResponse);
           }).catch(error => {
@@ -3341,10 +3345,7 @@
       });
       // We only listen for a result if the caller wants to be notified about it
       if (asyncHandle) {
-          // On completion, dispatch result back to .NET
-          // Not using "await" because it codegens a lot of boilerplate
-          promise.
-              then(result => endInvokeJSFromDotNet(identifier, asyncHandle, true, JSON.stringify(createJSCallResult(result, resultType))), error => {
+          promise.then(result => endInvokeJSFromDotNet(identifier, asyncHandle, true, JSON.stringify(createJSCallResult(result, resultType))), error => {
               console.error(error);
               return endInvokeJSFromDotNet(identifier, asyncHandle, false, JSON.stringify([asyncHandle, false, (error)]));
           });
