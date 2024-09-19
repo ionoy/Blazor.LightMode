@@ -16,6 +16,7 @@ public static class LightModeExtensions
     {
         services.Replace(new ServiceDescriptor(typeof(NavigationManager), typeof(LightModeNavigationManager), ServiceLifetime.Scoped));
         services.AddSingleton<LightModeCircuitHost>();
+        services.AddScoped<LightModeRendererEvents>();
         services.AddScoped<IRazorComponentEndpointInvoker, LightModeEndpointInvoker>();
         services.AddScoped<LightModeJSRuntime>();
         services.AddScoped<IJSRuntime>(provider => provider.GetRequiredService<LightModeJSRuntime>());

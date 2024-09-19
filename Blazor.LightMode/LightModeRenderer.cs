@@ -19,8 +19,8 @@ public partial class LightModeRenderer : WebRenderer
 {
     private readonly LightModeJSRuntime _jsRuntime;
     private readonly ConcurrentQueue<string> _renderBatchQueue = [];
-    private readonly ConcurrentQueue<int> _onAfterRenderQueue = [];
-    private readonly LightModeNavigationManager _navigationManager;
+    // this should only be updated on the renderer dispatcher 
+    private readonly ConcurrentDictionary<int, bool> _onAfterRenderSet = []; 
     private readonly Dictionary<int,ComponentState> _componentStateById;
     private readonly ILogger<LightModeRenderer> _logger;
     public bool IsInitialRender { get; set; } = true;
@@ -30,12 +30,13 @@ public partial class LightModeRenderer : WebRenderer
     private static readonly MethodInfo WaitForQuiescenceMethod = typeof(Renderer).GetMethod("WaitForQuiescence", BindingFlags.NonPublic | BindingFlags.Instance)!;
     private static readonly FieldInfo ComponentStateByIdField = typeof(Renderer).GetField("_componentStateById", BindingFlags.NonPublic | BindingFlags.Instance)!;
     public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
-    public LightModeRendererEvents RendererEvents { get; } = new();
+    public LightModeRendererEvents RendererEvents { get; }
     
-    public LightModeRenderer(LightModeCircuit circuit, IServiceProvider serviceProvider, ILoggerFactory loggerFactory) 
+    public LightModeRenderer(IServiceProvider serviceProvider, ILoggerFactory loggerFactory) 
         : base(serviceProvider, loggerFactory, new JsonSerializerOptions(), new JSComponentInterop(new JSComponentConfigurationStore() {}))
     {
-        _navigationManager = serviceProvider.GetRequiredService<NavigationManager>() as LightModeNavigationManager ?? throw new InvalidOperationException("The NavigationManager must be an instance of LightModeNavigationManager");
+        RendererEvents = serviceProvider.GetRequiredService<LightModeRendererEvents>();
+        
         _jsRuntime = serviceProvider.GetRequiredService<JSRuntime>() as LightModeJSRuntime ?? throw new InvalidOperationException("The JSRuntime must be an instance of LightModeJSRuntime");
         _htmlEncoder = serviceProvider.GetService<HtmlEncoder>() ?? HtmlEncoder.Default;
         _javaScriptEncoder = serviceProvider.GetService<JavaScriptEncoder>() ?? JavaScriptEncoder.Default;
@@ -62,7 +63,7 @@ public partial class LightModeRenderer : WebRenderer
         EnqueueSerializedRenderBatch(renderBatch);
 
         foreach (var diff in renderBatch.UpdatedComponents.Array)
-            _onAfterRenderQueue.Enqueue(diff.ComponentId);
+            _onAfterRenderSet.TryAdd(diff.ComponentId, true);
         
         RendererEvents.NotifyRenderBatchReceived();
         
@@ -81,13 +82,21 @@ public partial class LightModeRenderer : WebRenderer
         _renderBatchQueue.Enqueue(base64);
     }
 
-    public async Task CallOnAfterRender()
+    public async Task InvokeOnAfterRender()
     {
         var taskList = new List<Task>();
-            
-        while (_onAfterRenderQueue.TryDequeue(out var componentId))
+        var onAfterRenderSet = _onAfterRenderSet.ToArray();
+        
+        _onAfterRenderSet.Clear();
+        
+        foreach (var (componentId, _) in onAfterRenderSet)
+        {
             if (_componentStateById.TryGetValue(componentId, out var componentState) && componentState.Component is IHandleAfterRender handleAfterRender)
+            {
+                _logger.LogTrace("Invoking OnAfterRenderAsync for component {Component}", componentState.Component);
                 taskList.Add(handleAfterRender.OnAfterRenderAsync());
+            }
+        }
             
         await Task.WhenAll(taskList);
     }
@@ -120,21 +129,12 @@ public partial class LightModeRenderer : WebRenderer
         return new LightModeResponse(renderBatches, invokeJsInfos, renderCompleted);
     }
     
-    public Task<LightModeRootComponent> RenderComponentAsync(Type componentType)
+    public LightModeRootComponent RenderComponent(Type componentType, ParameterView? parameters = null)
     {
+        parameters ??= ParameterView.Empty;
         _logger.LogTrace("Rendering component {ComponentType}", componentType);
-        
-        return Dispatcher.InvokeAsync(async () => {
-            var content = BeginRenderingComponent(componentType, ParameterView.Empty);
-            await content.QuiescenceTask;
-            return content;
-        });
-    }
-    
-    private LightModeRootComponent BeginRenderingComponent(Type componentType, ParameterView parameters)
-    {
         var component = InstantiateComponent(componentType);
-        return BeginRenderingComponent(component, parameters);
+        return BeginRenderingComponent(component, parameters.Value);
     }
 
     private LightModeRootComponent BeginRenderingComponent(IComponent component, ParameterView initialParameters)

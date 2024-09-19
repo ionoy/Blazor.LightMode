@@ -1,18 +1,19 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
 namespace Blazor.LightMode;
 
-public class LightModeRendererEvents
+public class LightModeRendererEvents(ILogger<LightModeRendererEvents> logger)
 {
     private readonly ConcurrentDictionary<int, EventAwaiter> _eventAwaiters = new();
     private readonly ConcurrentQueue<EventAwaiter> _toRemove = new();
     private int _awaitersId;
-    private int _invocations;
-    public bool HasActiveInvocations => _invocations > 0;
+    private int _tasks;
+    public bool HasActiveInvocations => _tasks > 0;
 
     public Task WaitFor(EventKind eventKind)
     {
-        if (Interlocked.CompareExchange(ref _invocations, 0, 0) == 0)
+        if (Interlocked.CompareExchange(ref _tasks, 0, 0) == 0)
             return Task.CompletedTask;
         
         var id = Interlocked.Increment(ref _awaitersId);
@@ -23,21 +24,29 @@ public class LightModeRendererEvents
         return eventAwaiter.GetAwaiter();
     }
     
-    public void NotifyRenderBatchReceived() => NotifyAndRemove(EventKind.RenderBatchReceived);
-
-    public void NotifyJSCall() => NotifyAndRemove(EventKind.JSCall);
-
-    public void PushInvocation()
+    public void NotifyRenderBatchReceived()
     {
-        Console.WriteLine("PushInvocation");
-        Interlocked.Increment(ref _invocations);
+        logger.LogTrace("Render batch received");
+        NotifyAndRemove(EventKind.RenderBatchReceived);
+    }
+
+    public void NotifyJSCall()
+    {
+        logger.LogTrace("JS call received");
+        NotifyAndRemove(EventKind.JSCall);
+    }
+
+    public void PushTask(int taskId)
+    {
+        Interlocked.Increment(ref _tasks);
+        logger.LogTrace("Push task {TaskId}: {Tasks}", taskId, _tasks);
         NotifyAndRemove(EventKind.PushInvocation);
     }
 
-    public void PopInvocation()
+    public void PopTask(int taskId)
     {
-        Console.WriteLine("PopInvocation");
-        Interlocked.Decrement(ref _invocations);
+        Interlocked.Decrement(ref _tasks);
+        logger.LogTrace("Pop task {TaskId}: ({Tasks} remaining)", taskId, _tasks);
         NotifyAndRemove(EventKind.PopInvocation);
     }
     

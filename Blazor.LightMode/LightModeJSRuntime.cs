@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Blazor.LightMode.DotNetInternals;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 using Microsoft.JSInterop.Infrastructure;
 
@@ -11,6 +12,7 @@ namespace Blazor.LightMode;
 
 public class LightModeJSRuntime : JSRuntime
 {
+    private readonly ILogger<LightModeJSRuntime> _logger;
     public LightModeRenderer? Renderer { get; set; }
     public new JsonSerializerOptions JsonSerializerOptions => base.JsonSerializerOptions;
     
@@ -18,8 +20,9 @@ public class LightModeJSRuntime : JSRuntime
     // internal bool EndInvokeJS(long taskId, bool succeeded, ref Utf8JsonReader jsonReader)
     private static readonly MethodInfo EndInvokeJSMethod = typeof(JSRuntime).GetMethod("EndInvokeJS", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
-    public LightModeJSRuntime()
+    public LightModeJSRuntime(ILogger<LightModeJSRuntime> logger)
     {
+        _logger = logger;
         JsonSerializerOptions.Converters.Add(new ElementReferenceJsonConverter(new WebElementReferenceContext(this)));
     }
     
@@ -35,7 +38,7 @@ public class LightModeJSRuntime : JSRuntime
 
     protected override void BeginInvokeJS(long taskId, string identifier, string? argsJson, JSCallResultType resultType, long targetInstanceId)
     {
-        Console.WriteLine($"BeginInvokeJS: {taskId}, {identifier}, {argsJson}, {resultType}, {targetInstanceId}");
+        _logger.LogDebug("BeginInvokeJS: {TaskId}, {Identifier}, {ArgsJson}, {ResultType}, {TargetInstanceId}", taskId, identifier, argsJson, resultType, targetInstanceId);
         
         _invokeJsQueue.Enqueue(new(taskId, identifier, argsJson, resultType, targetInstanceId));
 
@@ -51,12 +54,12 @@ public class LightModeJSRuntime : JSRuntime
     
     protected override void EndInvokeDotNet(DotNetInvocationInfo invocationInfo, in DotNetInvocationResult invocationResult)
     {
-        Console.WriteLine($"EndInvokeDotNet: {invocationInfo.CallId}, {invocationResult.Success}, {invocationResult.ResultJson}");
+        _logger.LogDebug("EndInvokeDotNet: {CallId}, {Success}, {ResultJson}", invocationInfo.CallId, invocationResult.Success, invocationResult.ResultJson);
     }
     
     public bool EndInvokeJSFromDotNet(long? asyncHandle, bool success, string? result, bool isShortCircuit = false)
     {
-        Console.WriteLine($"EndInvokeJSFromDotNet: {asyncHandle}, {success}, {result}, isShortCircuit: {isShortCircuit}");
+        _logger.LogDebug("EndInvokeJSFromDotNet: {AsyncHandle}, {Success}, {Result}, {IsShortCircuit}", asyncHandle, success, result, isShortCircuit);
         
         if (asyncHandle == null)
             return true;

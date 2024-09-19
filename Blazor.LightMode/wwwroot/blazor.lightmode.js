@@ -3285,7 +3285,6 @@
       });
   }
   function endInvokeJSFromDotNet(identifier, asyncHandle, success, result) {
-      console.log("endInvokeJSFromDotNet", identifier, asyncHandle, success, result);
       return circuitFetch(`_endInvokeJSFromDotNet`, {
           RequestId: requestId,
           AsyncHandle: asyncHandle,

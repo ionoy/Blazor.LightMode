@@ -128,7 +128,6 @@ function waitForRender(): Promise<void> {
 }
 
 function endInvokeJSFromDotNet(identifier: string, asyncHandle: number, success: boolean, result: string): Promise<void> {
-    console.log("endInvokeJSFromDotNet", identifier, asyncHandle, success, result);
     return circuitFetch(`_endInvokeJSFromDotNet`, {
         RequestId: requestId,
         AsyncHandle: asyncHandle,

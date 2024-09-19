@@ -43,8 +43,11 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        Console.WriteLine("Weather: initializing");
         // Simulate asynchronous loading to demonstrate streaming rendering
         await Task.Delay(500);
+        
+        Console.WriteLine("Weather: wait over, loading data");
 
         var startDate = DateOnly.FromDateTime(DateTime.Now);
         var summaries = new[] {"Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"};
@@ -53,6 +56,8 @@ else
             TemperatureC = Random.Shared.Next(-20, 55),
             Summary = summaries[Random.Shared.Next(summaries.Length)]
         }).ToArray();
+        
+        Console.WriteLine("Weather: data loaded");
     }
 
     private class WeatherForecast
