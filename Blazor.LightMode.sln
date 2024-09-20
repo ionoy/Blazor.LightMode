@@ -1,8 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Blazor.LightMode", "Blazor.LightMode\Blazor.LightMode.csproj", "{5FBD917A-F61D-4635-B39E-CB846485FAA3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Blazor.LightMode", "src\Blazor.LightMode\Blazor.LightMode.csproj", "{5FBD917A-F61D-4635-B39E-CB846485FAA3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample", "Sample\Sample.csproj", "{405A0921-D9AC-46CB-8C20-AA929D287F91}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample", "samples\Sample\Sample.csproj", "{405A0921-D9AC-46CB-8C20-AA929D287F91}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

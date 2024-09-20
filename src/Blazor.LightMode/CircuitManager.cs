@@ -7,11 +7,11 @@ public class DefaultLightModeCircuitManager : ILightModeCircuitManager
 {
     private readonly ILogger<DefaultLightModeCircuitManager> _logger;
     private LightModeCircuitHost? _host;
-    private readonly SemaphoreSlim _runGc = new (1);
+    private readonly SemaphoreSlim _runGc = new (0);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _circuitUsage = new();
 
-    public static int MinimumCircuitCount = 1;
-    public static int MaximumCircuitCount = 1;
+    public static int MinimumCircuitCount = 10;
+    public static int MaximumCircuitCount = 1000;
     public static TimeSpan CircuitTimeout = TimeSpan.FromHours(8);
 
     public DefaultLightModeCircuitManager(ILogger<DefaultLightModeCircuitManager> logger)

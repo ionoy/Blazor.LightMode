@@ -25,7 +25,6 @@
     protected override async Task OnInitializedAsync()
     {
         await JSRuntime.InvokeVoidAsync("eval", "changeTitle = (element) => {element.innerText = 'Counter (changed from JavaScript)';}");
-        
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
