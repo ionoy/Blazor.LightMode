@@ -1,0 +1,3 @@
+[submodule "ext/aspnetcore"]
+	path = ext/aspnetcore
+	url = https://github.com/dotnet/aspnetcore.git

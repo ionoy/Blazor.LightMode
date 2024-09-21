@@ -1,0 +1,25 @@
+{
+  "name": "blazor.lightmode.js",
+  "private": true,
+  "version": "0.0.1",
+  "description": "",
+  "scripts": {
+    "build": "rollup -c --environment development --forceExit --bundleConfigAsCjs",
+    "build:production": "rollup -c --environment production --forceExit --bundleConfigAsCjs",
+    "watch": "rollup -c --environment development --watch --bundleConfigAsCjs"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.23.6",
+    "@babel/preset-env": "^7.23.6",
+    "@babel/preset-typescript": "^7.23.3",
+    "@microsoft/dotnet-js-interop": "^8.0.0",
+    "@microsoft/signalr": "^8.0.7",
+    "@microsoft/signalr-protocol-msgpack": "*",
+    "@rollup/plugin-alias": "^5.1.0",
+    "@rollup/plugin-commonjs": "^26.0.1",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@types/jsdom": "^16.2.14",
+    "rollup": "^4.21.3",
+    "rollup-plugin-typescript2": "^0.36.0"
+  }
+}

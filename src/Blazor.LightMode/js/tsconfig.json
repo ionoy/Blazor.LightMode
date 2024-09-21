@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "outDir": "../wwwroot/js",
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": [ "DOM", "ES2022" ],
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "noEmitOnError": true,
+    "removeComments": false,
+    "useDefineForClassFields": false,
+    "moduleResolution": "node",
+    "rootDirs": [
+      "./src",
+      "../../../ext/aspnetcore/src/Components/Web.JS/src"
+    ],
+    "baseUrl": ".",
+    "paths": {
+//      "@microsoft/signalr": ["./node_modules/@microsoft/signalr/dist/esm/index.d.ts"],
+//      "@microsoft/dotnet-js-interop": ["./node_modules/@microsoft/dotnet-js-interop/dist/Microsoft.JSInterop.d.ts"],
+      "dotnet-runtime": ["../../../ext/aspnetcore/src/Components/dotnet-runtime-js/dotnet.d.ts"],
+      "dotnet-runtime/dotnet-legacy": ["../../../ext/aspnetcore/src/Components/dotnet-runtime-js/dotnet-legacy.d.ts"],
+      "*": ["node_modules/*"]
+    }
+  },
+  "files": [
+    "./src/Boot.LightMode.ts"
+  ],
+  "include": [
+    "./src/**/*",
+    "../../../ext/aspnetcore/src/Components/Web.JS/*.ts"
+  ]
+}

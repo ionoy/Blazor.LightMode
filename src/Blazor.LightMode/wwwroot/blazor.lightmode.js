@@ -1473,8 +1473,6 @@
       return closestElement.namespaceURI === 'http://www.w3.org/2000/svg' && closestElement['tagName'] !== 'foreignObject';
   }
   function getLogicalChildrenArray(element) {
-      if (element == null)
-          return [];
       return element[logicalChildrenPropname];
   }
   function getLogicalNextSibling(element) {
@@ -2865,7 +2863,7 @@
   // The .NET Foundation licenses this file to you under the MIT license.
   const domFunctions = {
       focus,
-      focusBySelector
+      focusBySelector,
   };
   function focus(element, preventScroll) {
       if (element instanceof HTMLElement) {
@@ -2883,7 +2881,7 @@
           throw new Error('Unable to focus an invalid element.');
       }
   }
-  function focusBySelector(selector, preventScroll) {
+  function focusBySelector(selector) {
       const element = document.querySelector(selector);
       if (element) {
           // If no explicit tabindex is defined, mark it as programmatically-focusable.
@@ -3189,8 +3187,6 @@
   // Make the following APIs available in global scope for invocation from JS
   window['Blazor'] = Blazor;
 
-  // Licensed to the .NET Foundation under one or more agreements.
-  // The .NET Foundation licenses this file to you under the MIT license.
   var JSCallResultType = DotNet.JSCallResultType;
   DotNet.DotNetObject;
   var createJSObjectReference = DotNet.createJSObjectReference;
@@ -3203,10 +3199,8 @@
           initScript.remove();
           Blazor._internal.navigationManager.enableNavigationInterception(WebRendererId.Server);
           Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.Server, (uri, state, intercepted) => {
-              console.log("locationChanged", uri, state, intercepted);
               return locationChanged(uri);
           }, (callId, uri, state, intercepted) => {
-              console.log("locationChanging", callId, uri, state, intercepted);
               return new Promise((resolve, reject) => { });
           });
           const documentRoot = document.getRootNode();
@@ -3320,7 +3314,7 @@
           renderSerializedRenderBatch(batch);
       for (const invokeJsInfo of response.invokeJsInfos)
           beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId);
-      if (response.serializedRenderBatches.length > 0)
+      if (response.needsAfterRender)
           await onAfterRender();
       if (!response.renderCompleted)
           await waitForRender();

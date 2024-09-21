@@ -1,4 +1,3 @@
-using Blazor.LightMode.DotNetInternals;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.JSInterop;
 
@@ -20,7 +19,7 @@ public class LightModelScrollToLocationHash : IScrollToLocationHash
         if (hashIndex > -1 && locationAbsolute.Length > hashIndex + 1)
         {
             var elementId = locationAbsolute[(hashIndex + 1)..];
-            await _jsRuntime.InvokeVoidAsync(BrowserNavigationManagerInterop.ScrollToElement, elementId);
+            await _jsRuntime.InvokeVoidAsync("Blazor._internal.navigationManager.scrollToElement", elementId);
         }
     }
 }

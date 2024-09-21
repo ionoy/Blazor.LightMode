@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.RenderTree;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -69,7 +70,10 @@ public partial class LightModeRenderer : WebRenderer
         
         _logger.LogTrace("Added render batch to queue: {RenderBatchCount}", _renderBatchQueue.Count);
         
-        return CanceledRenderTask;
+        if (!LightModeOptions.MergeAfterRender)
+            return CanceledRenderTask;
+
+        return Task.CompletedTask;
     }
     
     private void EnqueueSerializedRenderBatch(RenderBatch renderBatch)
@@ -126,7 +130,7 @@ public partial class LightModeRenderer : WebRenderer
         var invokeJsInfos = _jsRuntime.GetInvokeJsQueue();
         var renderCompleted = !RendererEvents.HasActiveInvocations;
         
-        return new LightModeResponse(renderBatches, invokeJsInfos, renderCompleted);
+        return new LightModeResponse(renderBatches, invokeJsInfos, renderCompleted, !LightModeOptions.MergeAfterRender && renderBatches.Count > 0);
     }
     
     public LightModeRootComponent RenderComponent(Type componentType, ParameterView? parameters = null)

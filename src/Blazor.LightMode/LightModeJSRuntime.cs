@@ -2,7 +2,6 @@
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
-using Blazor.LightMode.DotNetInternals;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
@@ -42,12 +41,12 @@ public class LightModeJSRuntime : JSRuntime
         
         _invokeJsQueue.Enqueue(new(taskId, identifier, argsJson, resultType, targetInstanceId));
 
-        // if (resultType == JSCallResultType.JSVoidResult)
-        // {
-        //     // auto resolve void calls to prevent deadlocks and reduce chatter
-        //     EndInvokeJSFromDotNet(taskId, true, null, true);
-        //     return;
-        // }
+        if (LightModeOptions.ShortCircuitVoidJsCalls && resultType == JSCallResultType.JSVoidResult)
+        {
+            // auto resolve void calls to prevent deadlocks and reduce chatter
+            EndInvokeJSFromDotNet(taskId, true, null, true);
+            return;
+        }
         
         Renderer?.RendererEvents.NotifyJSCall();
     }
