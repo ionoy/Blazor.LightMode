@@ -4,12 +4,20 @@
         <TargetFramework>net8.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <Version>0.1.0</Version>
+        <Title>Blazor LightMode</Title>
+        <Description>Write Blazor Server apps that don't need persistent connection</Description>
+        <Copyright>ION OÜ</Copyright>
+        <PackageProjectUrl>https://github.com/ionoy/Blazor.LightMode</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/ionoy/Blazor.LightMode</RepositoryUrl>
+        <NoWarn>BL0006</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App"/>
-        <PackageReference Include="Microsoft.AspNetCore.Components" Version="8.0.8"/>
-        <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.8"/>
+        <PackageReference Include="Microsoft.AspNetCore.Components" Version="8.0.0"/>
+        <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.0"/>
     </ItemGroup>
     
     <ItemGroup>
