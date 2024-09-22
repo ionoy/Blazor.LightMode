@@ -107,6 +107,8 @@ public partial class LightModeRenderer : WebRenderer
 
     private async Task WaitForQuiescence()
     {
+        
+        
         _logger.LogTrace("Waiting for quiescence");
         await (Task) WaitForQuiescenceMethod.Invoke(this, [])!;
         MakeSurePendingTasksNotNull();
