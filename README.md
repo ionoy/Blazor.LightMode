@@ -2,7 +2,7 @@
 
 Write Blazor applications without requiring WebAssembly or persistent connections (web sockets).
 
-LightMode uses `fetch` to request render updates from server. This means that external services can't initiate DOM updates by calling `StateHasChanged`, but you still can write code like this:
+LightMode functions like a regular Blazor Server application but uses `fetch` to request render updates from the server. This means that external services can't initiate DOM updates by calling `StateHasChanged`, but you still can write code like this:
 
 ```cs
   public async Task OnClick()
