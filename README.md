@@ -100,6 +100,7 @@ Contributions are welcome! If you'd like to contribute, please follow these step
 ### How to build
 
 * Fork the repo
+* Run `git submodule update --init --recursive`
 * Go to `src\Blazor.LightMode\js\` and run `npm install`
 * Now open the solution file in the root directory and build
 
