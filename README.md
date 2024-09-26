@@ -59,7 +59,8 @@ app.UseLightMode(); // ADD THIS LINE
 app.Run();
 ```
 
-Update App.razor
+### Update App.razor
+
 Replace the existing Blazor script reference:
 
 ```html
