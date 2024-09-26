@@ -4,9 +4,10 @@ Blazor rendering pipeline that uses browser `fetch` instead of SignalR
 
 This means that you can:
 
-* Forget disconnected sessions
+* Forget about disconnected sessions
 * Avoid paying for an expensive server
 * Access your backend services without an API
+  
   
 [2024-09-23 11-31-47.webm](https://github.com/user-attachments/assets/fdd8148c-b1f5-4d76-a79d-d37136193585)
 
