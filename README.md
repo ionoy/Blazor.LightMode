@@ -91,6 +91,10 @@ Contributions are welcome! If you'd like to contribute, please follow these step
 * Go to `src\Blazor.LightMode\js\` and run `npm install`
 * Now open the solution file in the root directory and build
 
+## Join Discord server
+
+[https://discord.gg/CyRWCM4u](https://discord.gg/WzjgW4aj8E)
+
 ## License 📄
 
 This project is licensed under the MIT License.
