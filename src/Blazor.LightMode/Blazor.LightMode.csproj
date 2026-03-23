@@ -5,14 +5,32 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>0.1.0</Version>
+        <Version>0.1.1</Version>
         <Title>Blazor LightMode</Title>
         <Description>Write Blazor Server apps that don't need persistent connection</Description>
         <Copyright>ION OÜ</Copyright>
         <PackageProjectUrl>https://github.com/ionoy/Blazor.LightMode</PackageProjectUrl>
         <RepositoryUrl>https://github.com/ionoy/Blazor.LightMode</RepositoryUrl>
         <NoWarn>BL0006</NoWarn>
+        <PackageLicenseUrl>https://github.com/ionoy/Blazor.LightMode/blob/master/LICENSE</PackageLicenseUrl>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
+    
+    <ItemGroup>
+        <None Include="..\..\README.md" Pack="true" PackagePath="\"/>
+        <Content Remove="js\package.json" />
+        <None Include="js\package.json">
+          <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+        </None>
+        <Content Remove="js\package-lock.json" />
+        <None Include="js\package-lock.json">
+          <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+        </None>
+        <Content Remove="js\tsconfig.json" />
+        <None Include="js\tsconfig.json">
+          <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
 
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App"/>

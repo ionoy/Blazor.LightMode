@@ -60,6 +60,22 @@ app.UseLightMode(); // ADD THIS LINE
 app.Run();
 ```
 
+```csharp
+builder.Services.AddLightMode();
+```
+
+Configure the middleware:
+
+```csharp
+app.UseLightMode();
+```
+
+Remove or comment out the following line if present:
+
+```csharp
+app.AddInteractiveServerRenderMode();
+```
+
 ### Update App.razor
 
 Replace the existing Blazor script reference:
