@@ -42,6 +42,8 @@ public class LightModeCircuit : IDisposable
         _renderer = new LightModeRenderer(_serviceProvider, _loggerFactory);
     }
 
+    public void AcknowledgeResponse(long? responseId) => _renderer.AcknowledgeResponse(responseId);
+
     public async Task RenderRootComponentAsync(HttpContext context, Type componentType)
     {
         var htmlString = await _renderer.Dispatcher.InvokeAsync(async () => {
@@ -66,31 +68,40 @@ public class LightModeCircuit : IDisposable
         await context.Response.WriteAsync(htmlString).ConfigureAwait(false);
     }
     
-public async Task<LightModeResponse> InvokeMethodAsync(string? assemblyName, string? methodIdentifier, int? objectReference, JsonElement[] args)
+    public async Task<LightModeResponse> InvokeMethodAsync(string? assemblyName, string? methodIdentifier, int? objectReference, JsonElement[] args)
     {
         if (objectReference == 0 && methodIdentifier == nameof(DispatchEventAsync))
         {
             if (args.Length != 2)
                 throw new ArgumentException("The number of arguments must be 2");
-            
+
             return await DispatchEventAsync(args[0], args[1]);
         }
 
         return _renderer.CreateLightModeResponse();
     }
-    
+
     private async Task<LightModeResponse> DispatchEventAsync(JsonElement eventDescriptorJson, JsonElement eventArgsJson)
     {
         return await InvokeAsync(async taskId => {
             var eventDescriptor = JsonSerializer.Deserialize<EventDescriptor>(eventDescriptorJson.GetRawText(), _jsRuntime.JsonSerializerOptions)!;
-            var eventArgsType = _renderer.GetEventArgsType(eventDescriptor.EventHandlerId);
-            var eventArgs = (EventArgs)JsonSerializer.Deserialize(eventArgsJson.GetRawText(), eventArgsType, _jsRuntime.JsonSerializerOptions)!;
-        
-            _logger.LogDebug("{TaskId} Dispatching event '{EventName}' to event handler {EventHandlerId}", taskId, eventDescriptor.EventName, eventDescriptor.EventHandlerId);
-            
-            await _renderer.DispatchEventAsync(eventDescriptor.EventHandlerId, eventDescriptor.EventFieldInfo, eventArgs);
+
+            try
+            {
+                var eventArgsType = _renderer.GetEventArgsType(eventDescriptor.EventHandlerId);
+                var eventArgs = (EventArgs)JsonSerializer.Deserialize(eventArgsJson.GetRawText(), eventArgsType, _jsRuntime.JsonSerializerOptions)!;
+
+                _logger.LogDebug("{TaskId} Dispatching event '{EventName}' to event handler {EventHandlerId}", taskId, eventDescriptor.EventName, eventDescriptor.EventHandlerId);
+
+                await _renderer.DispatchEventAsync(eventDescriptor.EventHandlerId, eventDescriptor.EventFieldInfo, eventArgs);
+            }
+            catch (ArgumentException exception) when (exception.ParamName == "eventHandlerId")
+            {
+                _logger.LogDebug(exception, "{TaskId} Ignoring stale event handler id {EventHandlerId} for event '{EventName}'", taskId, eventDescriptor.EventHandlerId, eventDescriptor.EventName);
+            }
         }, NextTaskId());
     }
+
     public async Task<LightModeResponse> EndInvokeJSFromDotNet(int? asyncHandle, bool success, string result)
     {
         return await InvokeAsync(taskId => {
@@ -122,8 +133,8 @@ public async Task<LightModeResponse> InvokeMethodAsync(string? assemblyName, str
     {
         var taskId = NextTaskId();
         _logger.LogDebug("{TaskId} Waiting for render", taskId);
-        await _renderer.RendererEvents.WaitFor(EventKind.JSCall | EventKind.RenderBatchReceived).ConfigureAwait(false);
-        return await InvokeAsync(_ => {}, taskId);
+        await _renderer.RendererEvents.WaitFor(EventKind.JSCall | EventKind.RenderBatchReceived | EventKind.PopInvocation).ConfigureAwait(false);
+        return await InvokeAsync(_ => { }, taskId);
     }
     
     private async Task<LightModeResponse> InvokeAsync(Func<int, Task> action, int taskId)

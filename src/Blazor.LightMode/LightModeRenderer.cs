@@ -20,10 +20,13 @@ public partial class LightModeRenderer : WebRenderer
 {
     private readonly LightModeJSRuntime _jsRuntime;
     private readonly ConcurrentQueue<string> _renderBatchQueue = [];
-    // this should only be updated on the renderer dispatcher 
-    private readonly ConcurrentDictionary<int, bool> _onAfterRenderSet = []; 
-    private readonly Dictionary<int,ComponentState> _componentStateById;
+    private readonly ConcurrentDictionary<int, bool> _onAfterRenderSet = [];
+    private readonly Dictionary<int, ComponentState> _componentStateById;
     private readonly ILogger<LightModeRenderer> _logger;
+    private readonly Queue<PendingResponse> _pendingResponses = [];
+    private readonly object _pendingResponsesLock = new();
+    private PendingResponse? _currentPendingResponse;
+    private long _nextResponseId;
     public bool IsInitialRender { get; set; } = true;
 
     private static readonly Task CanceledRenderTask = Task.FromCanceled(new CancellationToken(canceled: true));
@@ -73,7 +76,7 @@ public partial class LightModeRenderer : WebRenderer
         if (!LightModeOptions.MergeAfterRender)
             return CanceledRenderTask;
 
-        return Task.CompletedTask;
+        return GetOrCreatePendingResponse().Task;
     }
     
     private void EnqueueSerializedRenderBatch(RenderBatch renderBatch)
@@ -129,8 +132,51 @@ public partial class LightModeRenderer : WebRenderer
         var renderBatches = GetSerializedRenderBatches();
         var invokeJsInfos = _jsRuntime.GetInvokeJsQueue();
         var renderCompleted = !RendererEvents.HasActiveInvocations;
-        
-        return new LightModeResponse(renderBatches, invokeJsInfos, renderCompleted, !LightModeOptions.MergeAfterRender && renderBatches.Count > 0);
+        long? responseId = null;
+
+        if (LightModeOptions.MergeAfterRender && renderBatches.Count > 0)
+        {
+            lock (_pendingResponsesLock)
+            {
+                responseId = Interlocked.Increment(ref _nextResponseId);
+                var pendingResponse = _currentPendingResponse ?? throw new InvalidOperationException("A pending response was not created for the current render batch.");
+                pendingResponse.ResponseId = responseId.Value;
+                _pendingResponses.Enqueue(pendingResponse);
+                _currentPendingResponse = null;
+            }
+        }
+
+        return new LightModeResponse(renderBatches, invokeJsInfos, renderCompleted, !LightModeOptions.MergeAfterRender && renderBatches.Count > 0, responseId);
+    }
+
+    public void AcknowledgeResponse(long? responseId)
+    {
+        if (responseId is null or <= 0)
+            return;
+
+        while (true)
+        {
+            PendingResponse? pendingResponse;
+
+            lock (_pendingResponsesLock)
+            {
+                if (_pendingResponses.Count == 0 || _pendingResponses.Peek().ResponseId > responseId.Value)
+                    return;
+
+                pendingResponse = _pendingResponses.Dequeue();
+            }
+
+            pendingResponse.Complete();
+        }
+    }
+
+    private PendingResponse GetOrCreatePendingResponse()
+    {
+        lock (_pendingResponsesLock)
+        {
+            _currentPendingResponse ??= new PendingResponse();
+            return _currentPendingResponse;
+        }
     }
     
     public LightModeRootComponent RenderComponent(Type componentType, ParameterView? parameters = null)
@@ -161,6 +207,16 @@ public partial class LightModeRenderer : WebRenderer
     protected override void AttachRootComponentToBrowser(int componentId, string domElementSelector) => Console.WriteLine($"Attaching component {componentId} to {domElementSelector}");
     protected override IComponent ResolveComponentForRenderMode(Type componentType, int? parentComponentId, IComponentActivator componentActivator, IComponentRenderMode renderMode)
         => componentActivator.CreateInstance(componentType);
+
+    private sealed class PendingResponse
+    {
+        private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public long ResponseId { get; set; }
+        public Task Task => _tcs.Task;
+
+        public void Complete() => _tcs.TrySetResult();
+    }
 }
 
 #pragma warning restore BL0006

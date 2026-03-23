@@ -33,35 +33,35 @@ public static class LightModeExtensions
     public static void UseLightMode(this WebApplication app)
     {
         app.MapPost("/_invokeMethodAsync", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]InvokeMethodArgs args) => {
-            if (await host.InvokeMethod(args.RequestId, args.AssemblyName, args.MethodIdentifier, args.ObjectReference, args.Arguments) is {} response)
+            if (await host.InvokeMethod(args.RequestId, args.AssemblyName, args.MethodIdentifier, args.ObjectReference, args.Arguments, args.AcknowledgedResponseId) is {} response)
                 await context.Response.WriteAsJsonAsync(response);
             else
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
         });
 
         app.MapPost("/_locationChanged", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]LocationChangedArgs args) => {
-            if (await host.LocationChanged(args.RequestId, args.Location) is {} response)
+            if (await host.LocationChanged(args.RequestId, args.Location, args.AcknowledgedResponseId) is {} response)
                 await context.Response.WriteAsJsonAsync(response);
             else
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
         });
 
         app.MapPost("/_onAfterRender", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]AfterRenderArgs args) => {
-            if (await host.OnAfterRender(args.RequestId) is {} response)
+            if (await host.OnAfterRender(args.RequestId, args.AcknowledgedResponseId) is {} response)
                 await context.Response.WriteAsJsonAsync(response);
             else
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
         });
         
         app.MapPost("/_endInvokeJSFromDotNet", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]EndInvokeJSFromDotNetArgs args) => {
-            if (await host.EndInvokeJSFromDotNet(args.RequestId, args.AsyncHandle, args.Success, args.Result) is {} response)
+            if (await host.EndInvokeJSFromDotNet(args.RequestId, args.AsyncHandle, args.Success, args.Result, args.AcknowledgedResponseId) is {} response)
                 await context.Response.WriteAsJsonAsync(response);
             else
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
         });
         
         app.MapPost("/_waitForRender", async (HttpContext context, [FromServices]LightModeCircuitHost host, [FromBody]WaitForRenderArgs args) => {
-            if (await host.WaitForRender(args.RequestId) is {} response)
+            if (await host.WaitForRender(args.RequestId, args.AcknowledgedResponseId) is {} response)
                 await context.Response.WriteAsJsonAsync(response);
             else
                 context.Response.StatusCode = StatusCodes.Status404NotFound;

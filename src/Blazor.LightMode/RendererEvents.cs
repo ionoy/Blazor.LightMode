@@ -15,12 +15,19 @@ public class LightModeRendererEvents(ILogger<LightModeRendererEvents> logger)
     {
         if (Interlocked.CompareExchange(ref _tasks, 0, 0) == 0)
             return Task.CompletedTask;
-        
+
         var id = Interlocked.Increment(ref _awaitersId);
         var eventAwaiter = new EventAwaiter(id, eventKind);
-        
+
         _eventAwaiters.TryAdd(id, eventAwaiter);
-        
+
+        if (Interlocked.CompareExchange(ref _tasks, 0, 0) == 0)
+        {
+            eventAwaiter.OnCompleted();
+            _toRemove.Enqueue(eventAwaiter);
+            RemoveCompletedAwaiters();
+        }
+
         return eventAwaiter.GetAwaiter();
     }
     
@@ -73,18 +80,12 @@ public class LightModeRendererEvents(ILogger<LightModeRendererEvents> logger)
     internal class EventAwaiter(int id, EventKind eventKind)
     {
         public int Id { get; } = id;
-        public EventKind EventKind { get; private set; } = eventKind;
-        public bool IsCompleted => _tcs.Task.IsCompleted;
+        public EventKind EventKind { get; } = eventKind;
 
-        private readonly TaskCompletionSource _tcs = new();
-        private readonly object _lock = new();
+        private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task GetAwaiter() => _tcs.Task;
-        public void OnCompleted()
-        {
-            lock (_lock)
-                _tcs.SetResult();
-        }
+        public void OnCompleted() => _tcs.TrySetResult();
     }
 }
 

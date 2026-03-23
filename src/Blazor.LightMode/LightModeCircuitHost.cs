@@ -63,10 +63,11 @@ public class LightModeCircuitHost
             request.QueryString);
     }
     
-    public async Task<LightModeResponse?> InvokeMethod(string circuitId, string? assemblyName, string methodIdentifier, int objectReference, JsonElement[] arguments)
+    public async Task<LightModeResponse?> InvokeMethod(string circuitId, string? assemblyName, string methodIdentifier, int objectReference, JsonElement[] arguments, long? acknowledgedResponseId)
     {
         if (_circuits.TryGetValue(circuitId, out var circuit))
         {
+            circuit.AcknowledgeResponse(acknowledgedResponseId);
             _circuitManager.OnTask(circuitId);
             return await circuit.InvokeMethodAsync(assemblyName, methodIdentifier, objectReference, arguments);
         }
@@ -74,40 +75,44 @@ public class LightModeCircuitHost
         return null;
     }
 
-    public async Task<LightModeResponse?> LocationChanged(string circuitId, string location)
+    public async Task<LightModeResponse?> LocationChanged(string circuitId, string location, long? acknowledgedResponseId)
     {
         if (_circuits.TryGetValue(circuitId, out var circuit))
         {
+            circuit.AcknowledgeResponse(acknowledgedResponseId);
             _circuitManager.OnTask(circuitId);
             return await circuit.LocationChanged(location);
         }
         
         return null;
     }
-    public async Task<LightModeResponse?> OnAfterRender(string circuitId)
+    public async Task<LightModeResponse?> OnAfterRender(string circuitId, long? acknowledgedResponseId)
     {
         if (_circuits.TryGetValue(circuitId, out var circuit))
         {
+            circuit.AcknowledgeResponse(acknowledgedResponseId);
             _circuitManager.OnTask(circuitId);
             return await circuit.OnAfterRender();
         }
         
         return null;
     }
-    public async Task<LightModeResponse?> EndInvokeJSFromDotNet(string circuitId, int? asyncHandle, bool success, string result)
+    public async Task<LightModeResponse?> EndInvokeJSFromDotNet(string circuitId, int? asyncHandle, bool success, string result, long? acknowledgedResponseId)
     {
         if (_circuits.TryGetValue(circuitId, out var circuit))
         {
+            circuit.AcknowledgeResponse(acknowledgedResponseId);
             _circuitManager.OnTask(circuitId);
             return await circuit.EndInvokeJSFromDotNet(asyncHandle, success, result);
         }
         
         return null;
     }
-    public async Task<LightModeResponse?> WaitForRender(string circuitId)
+    public async Task<LightModeResponse?> WaitForRender(string circuitId, long? acknowledgedResponseId)
     {
         if (_circuits.TryGetValue(circuitId, out var circuit))
         {
+            circuit.AcknowledgeResponse(acknowledgedResponseId);
             _circuitManager.OnTask(circuitId);
             return await circuit.WaitForRender();
         }

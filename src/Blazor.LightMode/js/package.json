@@ -6,7 +6,9 @@
   "scripts": {
     "build": "rollup -c --environment development --forceExit --bundleConfigAsCjs",
     "build:production": "rollup -c --environment production --forceExit --bundleConfigAsCjs",
-    "watch": "rollup -c --environment development --watch --bundleConfigAsCjs"
+    "watch": "rollup -c --environment development --watch --bundleConfigAsCjs",
+    "test:build": "tsc -p tsconfig.tests.json",
+    "test": "npm run test:build && node --test ./dist-tests/tests/CircuitTransport.test.js"
   },
   "devDependencies": {
     "@babel/core": "^7.23.6",

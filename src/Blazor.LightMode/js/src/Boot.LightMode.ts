@@ -1,16 +1,30 @@
 import { renderBatch, attachRootComponentToLogicalElement } from '../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/Renderer';
-import {WebRendererId} from "../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/WebRendererId";
-import {OutOfProcessRenderBatch} from "../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/RenderBatch/OutOfProcessRenderBatch";
-import {toLogicalElement} from "../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/LogicalElements";
-import {attachWebRendererInterop} from "../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/WebRendererInteropMethods";
-import {DotNet} from "@microsoft/dotnet-js-interop";
-import {Blazor} from "../../../../ext/aspnetcore/src/Components/Web.JS/src/GlobalExports";
+import { WebRendererId } from '../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/WebRendererId';
+import { OutOfProcessRenderBatch } from '../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/RenderBatch/OutOfProcessRenderBatch';
+import { toLogicalElement } from '../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/LogicalElements';
+import { attachWebRendererInterop } from '../../../../ext/aspnetcore/src/Components/Web.JS/src/Rendering/WebRendererInteropMethods';
+import { DotNet } from '@microsoft/dotnet-js-interop';
+import { Blazor } from '../../../../ext/aspnetcore/src/Components/Web.JS/src/GlobalExports';
+import { createCircuitTransport, createLocationChangingHandler, LightModeResponse } from './CircuitTransport';
 
 import JSCallResultType = DotNet.JSCallResultType;
 import DotNetObject = DotNet.DotNetObject;
 import createJSObjectReference = DotNet.createJSObjectReference;
 import createJSStreamReference = DotNet.createJSStreamReference;
 import JsonReviver = DotNet.JsonReviver;
+
+let requestId = '';
+let acknowledgedResponseId = 0;
+const jsonRevivers: JsonReviver[] = [];
+window['DotNet'] = DotNet;
+
+const circuitTransport = createCircuitTransport({
+    fetch: (uri, init) => fetch(uri, init),
+    getRequestId: () => requestId,
+    getAcknowledgedResponseId: () => acknowledgedResponseId,
+    reload: () => location.reload(),
+    applyResponse: response => applyLightModeResponse(response)
+});
 
 function boot() {
     const initScript = document.getElementById('blazor-initialization');
@@ -21,60 +35,70 @@ function boot() {
         initScript.remove();
 
         Blazor._internal.navigationManager.enableNavigationInterception(WebRendererId.Server);
-        Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.Server, (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
-            return locationChanged(uri, intercepted); 
-        }, (callId: number, uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
-            return new Promise<void>((resolve, reject) => {});
-        });
+        Blazor._internal.navigationManager.listenForNavigationEvents(
+            WebRendererId.Server,
+            (uri: string, state: string | undefined, intercepted: boolean): Promise<void> => {
+                return locationChanged(uri, intercepted);
+            },
+            createLocationChangingHandler((callId, shouldContinue) => {
+                Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinue);
+            })
+        );
 
         const documentRoot = document.getRootNode();
         const html = (documentRoot as Element).children[0];
         const fragment = document.createDocumentFragment();
-        
+
         fragment.appendChild(html);
 
         attachRootComponentToLogicalElement(WebRendererId.Server, toLogicalElement(fragment, true), 0, false);
 
         const response = JSON.parse(initializationJson) as LightModeResponse;
-                
-        for (const batch of response.serializedRenderBatches)
-            renderSerializedRenderBatch(batch);
 
-        let htmlNew = (fragment as unknown as Element).children[0];
+        for (const batch of response.serializedRenderBatches) {
+            renderSerializedRenderBatch(batch);
+        }
+
+        const htmlNew = (fragment as unknown as Element).children[0];
         documentRoot.appendChild(htmlNew);
+        acknowledgedResponseId = response.responseId ?? acknowledgedResponseId;
 
         const interopMethods = {
-            serializeAsArg() { return { ["__dotNetObject"]: 0 }; },
-            dispose(): void {},
+            serializeAsArg() { return { ['__dotNetObject']: 0 }; },
+            dispose(): void { },
             invokeMethod: invokeMethodLightMode,
             invokeMethodAsync: invokeMethodAsyncLightMode
         } as unknown as DotNetObject;
 
         attachWebRendererInterop(WebRendererId.Server, interopMethods, undefined, undefined);
-        
-        for (const invokeJsInfo of response.invokeJsInfos)
-            beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId);
 
-        onAfterRender();
+        for (const invokeJsInfo of response.invokeJsInfos) {
+            void beginInvokeJSFromDotNet(
+                invokeJsInfo.taskId,
+                invokeJsInfo.identifier,
+                invokeJsInfo.argsJson,
+                invokeJsInfo.resultType,
+                invokeJsInfo.targetInstanceId
+            ).catch(error => console.error('beginInvokeJSFromDotNet error', error));
+        }
+
+        void circuitTransport.continueFrom(response).catch(error => console.error('initial continuation error', error));
     }
 }
 
-let requestId = "";
-const jsonRevivers: JsonReviver[] = [];
-window['DotNet'] = DotNet;
-
-document.addEventListener("DOMContentLoaded", function(event) {
-    if (window["__lightmode_initialized"])
+document.addEventListener('DOMContentLoaded', function () {
+    if (window['__lightmode_initialized']) {
         return;
-    
-    window["__lightmode_initialized"] = true;
-    
+    }
+
+    window['__lightmode_initialized'] = true;
+
     const commentNodes = document.getRootNode().childNodes;
     for (let i = commentNodes.length - 1; i >= 0; i--) {
         const commentNode = commentNodes[i];
         if (commentNode.nodeType === Node.COMMENT_NODE) {
             requestId = commentNode.nodeValue!.substring(10);
-            console.log("requestId", requestId);
+            console.log('requestId', requestId);
             break;
         }
     }
@@ -82,49 +106,37 @@ document.addEventListener("DOMContentLoaded", function(event) {
     boot();
 });
 
-
 function renderSerializedRenderBatch(serializedRenderBatch: string) {
     const binaryBatch = base64ToUint8Array(serializedRenderBatch);
     renderBatch(WebRendererId.Server, new OutOfProcessRenderBatch(binaryBatch));
 }
 
 function invokeMethodLightMode<T>(methodIdentifier: string, ...args: any[]): T {
-    console.log("invokeMethodLightMode", methodIdentifier, args);
+    console.log('invokeMethodLightMode', methodIdentifier, args);
     return null as T;
 }
-function invokeMethodAsyncLightMode<T>(methodIdentifier: string, ...args: any[]): Promise<T> {
-    return new Promise<T>(async (resolve, reject) => {
-        return await circuitFetch(`_invokeMethodAsync`, {
-            RequestId: requestId,
-            AssemblyName: null,
-            MethodIdentifier: methodIdentifier,
-            ObjectReference: 0,
-            Arguments: args
-        });
+
+async function invokeMethodAsyncLightMode<T>(methodIdentifier: string, ...args: any[]): Promise<T> {
+    await circuitFetch('_invokeMethodAsync', {
+        RequestId: requestId,
+        AssemblyName: null,
+        MethodIdentifier: methodIdentifier,
+        ObjectReference: 0,
+        Arguments: args
     });
+
+    return null as T;
 }
 
-function locationChanged(uri: string, intercepted: boolean): Promise<void> {
-    return circuitFetch(`_locationChanged`, {
+function locationChanged(uri: string, _intercepted: boolean): Promise<void> {
+    return circuitFetch('_locationChanged', {
         RequestId: requestId,
-        Location: uri,
-    });
-}
-
-function onAfterRender(): Promise<void> {
-    return circuitFetch(`_onAfterRender`, {
-        RequestId: requestId,
-    });
-}
-
-function waitForRender(): Promise<void> {
-    return circuitFetch(`_waitForRender`, {
-        RequestId: requestId,
+        Location: uri
     });
 }
 
 function endInvokeJSFromDotNet(identifier: string, asyncHandle: number, success: boolean, result: string): Promise<void> {
-    return circuitFetch(`_endInvokeJSFromDotNet`, {
+    return circuitFetch('_endInvokeJSFromDotNet', {
         RequestId: requestId,
         AsyncHandle: asyncHandle,
         Success: success,
@@ -132,44 +144,35 @@ function endInvokeJSFromDotNet(identifier: string, asyncHandle: number, success:
     });
 }
 
-function circuitFetch(uri: string, body: any): Promise<void> {
-    console.log("circuitFetch", uri, body);
-    return new Promise<void>((resolve, reject) => {
-        fetch(uri, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(body)
-        }).then(async response => {
-            if (response.status === 404) {
-                location.reload();
-                return;
-            }
-            let lightModeResponse = await response.json() as LightModeResponse;
-            await handleResponse(lightModeResponse);
-        }).catch(error => {
-            console.error(uri + " error", error);                        
-            reject(error);
-        });
-    });
+async function circuitFetch(uri: string, body: any): Promise<void> {
+    console.log('circuitFetch', uri, body);
+
+    try {
+        await circuitTransport.invoke(uri, body);
+    } catch (error) {
+        console.error(uri + ' error', error);
+        throw error;
+    }
 }
 
+function applyLightModeResponse(response: LightModeResponse) {
+    console.log('Handling response', response);
 
-async function handleResponse(response: LightModeResponse) {
-    console.log("Handling response", response);
-    
-    for (const batch of response.serializedRenderBatches)
+    for (const batch of response.serializedRenderBatches) {
         renderSerializedRenderBatch(batch);
-    
-    for (const invokeJsInfo of response.invokeJsInfos)
-        beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId);        
+    }
 
-    if (response.needsAfterRender)
-        await onAfterRender();
-    
-    if (!response.renderCompleted)
-        await waitForRender();
+    acknowledgedResponseId = response.responseId ?? acknowledgedResponseId;
+
+    for (const invokeJsInfo of response.invokeJsInfos) {
+        void beginInvokeJSFromDotNet(
+            invokeJsInfo.taskId,
+            invokeJsInfo.identifier,
+            invokeJsInfo.argsJson,
+            invokeJsInfo.resultType,
+            invokeJsInfo.targetInstanceId
+        ).catch(error => console.error('beginInvokeJSFromDotNet error', error));
+    }
 }
 
 function base64ToUint8Array(base64: string) {
@@ -182,30 +185,31 @@ function base64ToUint8Array(base64: string) {
     return binaryBatch;
 }
 
-function beginInvokeJSFromDotNet(asyncHandle: number, identifier: string, argsJson: string | null, resultType: DotNet.JSCallResultType, targetInstanceId: number): void {
-    // Coerce synchronous functions into async ones, plus treat
-    // synchronous exceptions the same as async ones
-    const promise = new Promise<any>(resolve => {
+async function beginInvokeJSFromDotNet(asyncHandle: number, identifier: string, argsJson: string | null, resultType: DotNet.JSCallResultType, targetInstanceId: number): Promise<void> {
+    let success = true;
+    let resultPayload = 'null';
+
+    try {
         const args = argsJson ? parseJsonWithRevivers(argsJson) : null;
         const jsFunction = DotNet.findJSFunction(identifier, targetInstanceId);
         const synchronousResultOrPromise = jsFunction(...(args || []));
-        resolve(synchronousResultOrPromise);
-    });
-
-    // We only listen for a result if the caller wants to be notified about it
-    if (asyncHandle) {
-        promise.then(
-            result => endInvokeJSFromDotNet(identifier, asyncHandle, true, JSON.stringify(createJSCallResult(result, resultType))),
-            error => {
-                console.error(error);                
-                return endInvokeJSFromDotNet(identifier, asyncHandle, false, JSON.stringify([asyncHandle, false, (error)]));
-            }
-        );
+        const result = await Promise.resolve(synchronousResultOrPromise);
+        resultPayload = JSON.stringify(createJSCallResult(result, resultType));
+    } catch (error) {
+        console.error(error);
+        success = false;
+        resultPayload = JSON.stringify([asyncHandle, false, formatError(error)]);
     }
+
+    if (!asyncHandle || resultType === JSCallResultType.JSVoidResult) {
+        return;
+    }
+
+    await endInvokeJSFromDotNet(identifier, asyncHandle, success, resultPayload);
 }
 
 function heartbeat() {
-    navigator.sendBeacon("_heartbeat", JSON.stringify({ RequestId: requestId }));
+    navigator.sendBeacon('_heartbeat', JSON.stringify({ RequestId: requestId }));
 }
 
 function createJSCallResult(returnValue: any, resultType: JSCallResultType) {
@@ -230,20 +234,27 @@ function stringifyArgs(args: any[] | null) {
 function argReplacer(key: string, value: any) {
     if (value instanceof DotNetObject) {
         return value.serializeAsArg();
-    } else if (value instanceof Uint8Array) {
+    }
+
+    if (value instanceof Uint8Array) {
         throw new Error('Uint8Array not supported');
     }
 
     return value;
 }
 
-function formatError(error: Error | string): string {
+function formatError(error: unknown): string {
     if (error instanceof Error) {
         return `${error.message}\n${error.stack}`;
     }
 
-    return error ? error.toString() : "null";
+    if (typeof error === 'string') {
+        return error;
+    }
+
+    return error ? error.toString() : 'null';
 }
+
 function attachReviver(reviver: JsonReviver) {
     jsonRevivers.push(reviver);
 }
@@ -257,51 +268,32 @@ function getCaptureIdAttributeName(referenceCaptureId: string) {
     return `_bl_${referenceCaptureId}`;
 }
 
-const elementRefKey = '__internalId'; // Keep in sync with ElementRef.cs
-const jsObjectIdKey = "__jsObjectId";
-const dotNetObjectRefKey = "__dotNetObject";
-const byteArrayRefKey = "__byte[]";
-const dotNetStreamRefKey = "__dotNetStream";
-const jsStreamReferenceLengthKey = "__jsStreamReferenceLength";
+const elementRefKey = '__internalId';
+const jsObjectIdKey = '__jsObjectId';
+const dotNetObjectRefKey = '__dotNetObject';
+const byteArrayRefKey = '__byte[]';
+const dotNetStreamRefKey = '__dotNetStream';
+const jsStreamReferenceLengthKey = '__jsStreamReferenceLength';
 
-// attach element reference reviver
 attachReviver((key, value) => {
     if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, elementRefKey) && typeof value[elementRefKey] === 'string') {
         return getElementByCaptureId(value[elementRefKey]);
-    } else {
-        return value;
     }
-});
-function parseJsonWithRevivers(json: string | null): any {
-    const result = json ? JSON.parse(json, (key, initialValue) => {
-        // Invoke each reviver in order, passing the output from the previous reviver,
-        // so that each one gets a chance to transform the value
 
+    return value;
+});
+
+function parseJsonWithRevivers(json: string | null): any {
+    return json ? JSON.parse(json, (key, initialValue) => {
         return jsonRevivers.reduce(
             (latestValue, reviver) => reviver(key, latestValue),
             initialValue
         );
     }) : null;
-    return result;
 }
 
-interface InvokeJsInfo {
-    taskId: number;
-    identifier: string;
-    argsJson: string | null;
-    resultType: JSCallResultType;
-    targetInstanceId: number;
-}
-
-interface LightModeResponse {
-    serializedRenderBatches: string[];
-    invokeJsInfos: InvokeJsInfo[];
-    renderCompleted: boolean;
-    needsAfterRender: boolean;
-}
-
-Blazor._internal.PageTitle.getAndRemoveExistingTitle = function () : string {
+Blazor._internal.PageTitle.getAndRemoveExistingTitle = function (): string {
     const titleElement = document.querySelector('title');
     const title = titleElement ? titleElement.textContent : '';
     return title || '';
-}
+};

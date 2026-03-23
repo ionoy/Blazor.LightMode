@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist-tests",
+    "rootDir": ".",
+    "target": "ES2022",
+    "module": "CommonJS",
+    "lib": ["DOM", "ES2022"],
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "noEmitOnError": true,
+    "moduleResolution": "node"
+  },
+  "include": [
+    "./src/CircuitTransport.ts",
+    "./tests/CircuitTransport.test.ts"
+  ]
+}

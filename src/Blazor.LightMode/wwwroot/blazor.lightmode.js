@@ -3187,10 +3187,116 @@
   // Make the following APIs available in global scope for invocation from JS
   window['Blazor'] = Blazor;
 
+  const jsonHeaders = {
+      'Content-Type': 'application/json'
+  };
+  function createCircuitTransport(dependencies) {
+      const post = async (endpoint, body) => {
+          let response;
+          try {
+              response = await dependencies.fetch(endpoint, {
+                  method: 'POST',
+                  headers: jsonHeaders,
+                  body: JSON.stringify(appendAcknowledgedResponseId(body, dependencies.getAcknowledgedResponseId()))
+              });
+          }
+          catch (error) {
+              throw new Error(`LightMode request '${endpoint}' failed: ${formatUnknownError(error)}`);
+          }
+          if (response.status === 404) {
+              dependencies.reload();
+              return null;
+          }
+          if (!response.ok) {
+              const details = await readResponseError(response);
+              throw new Error(`LightMode request '${endpoint}' failed with status ${response.status}${details ? `: ${details}` : ''}`);
+          }
+          return await response.json();
+      };
+      const continueFrom = async (response) => {
+          let currentResponse = response;
+          while (true) {
+              const nextEndpoint = resolveNextEndpoint(currentResponse);
+              if (!nextEndpoint) {
+                  return;
+              }
+              const nextResponse = await post(nextEndpoint, { RequestId: dependencies.getRequestId() });
+              if (!nextResponse) {
+                  return;
+              }
+              await dependencies.applyResponse(nextResponse);
+              currentResponse = nextResponse;
+          }
+      };
+      const invoke = async (endpoint, body) => {
+          const initialResponse = await post(endpoint, body);
+          if (!initialResponse) {
+              return;
+          }
+          await dependencies.applyResponse(initialResponse);
+          await continueFrom(initialResponse);
+      };
+      return {
+          invoke,
+          continueFrom
+      };
+  }
+  function createLocationChangingHandler(endLocationChanging) {
+      return async (callId, _uri, _state, _intercepted) => {
+          endLocationChanging(callId, true);
+      };
+  }
+  function resolveNextEndpoint(response) {
+      if (response.needsAfterRender) {
+          return '_onAfterRender';
+      }
+      if (!response.renderCompleted) {
+          return '_waitForRender';
+      }
+      return null;
+  }
+  async function readResponseError(response) {
+      if (!response.text) {
+          return '';
+      }
+      try {
+          return await response.text();
+      }
+      catch {
+          return '';
+      }
+  }
+  function formatUnknownError(error) {
+      if (error instanceof Error) {
+          return error.message;
+      }
+      return String(error);
+  }
+  function appendAcknowledgedResponseId(body, acknowledgedResponseId) {
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return body;
+      }
+      return {
+          ...body,
+          AcknowledgedResponseId: acknowledgedResponseId
+      };
+  }
+
   var JSCallResultType = DotNet.JSCallResultType;
   DotNet.DotNetObject;
   var createJSObjectReference = DotNet.createJSObjectReference;
   var createJSStreamReference = DotNet.createJSStreamReference;
+  let requestId = '';
+  let acknowledgedResponseId = 0;
+  const jsonRevivers = [];
+  window['DotNet'] = DotNet;
+  const circuitTransport = createCircuitTransport({
+      fetch: (uri, init) => fetch(uri, init),
+      getRequestId: () => requestId,
+      getAcknowledgedResponseId: () => acknowledgedResponseId,
+      reload: () => location.reload(),
+      applyResponse: response => applyLightModeResponse(response)
+  });
   function boot() {
       const initScript = document.getElementById('blazor-initialization');
       if (initScript) {
@@ -3200,44 +3306,45 @@
           Blazor._internal.navigationManager.enableNavigationInterception(WebRendererId.Server);
           Blazor._internal.navigationManager.listenForNavigationEvents(WebRendererId.Server, (uri, state, intercepted) => {
               return locationChanged(uri);
-          }, (callId, uri, state, intercepted) => {
-              return new Promise((resolve, reject) => { });
-          });
+          }, createLocationChangingHandler((callId, shouldContinue) => {
+              Blazor._internal.navigationManager.endLocationChanging(callId, shouldContinue);
+          }));
           const documentRoot = document.getRootNode();
           const html = documentRoot.children[0];
           const fragment = document.createDocumentFragment();
           fragment.appendChild(html);
           attachRootComponentToLogicalElement(WebRendererId.Server, toLogicalElement(fragment, true), 0, false);
           const response = JSON.parse(initializationJson);
-          for (const batch of response.serializedRenderBatches)
+          for (const batch of response.serializedRenderBatches) {
               renderSerializedRenderBatch(batch);
-          let htmlNew = fragment.children[0];
+          }
+          const htmlNew = fragment.children[0];
           documentRoot.appendChild(htmlNew);
+          acknowledgedResponseId = response.responseId ?? acknowledgedResponseId;
           const interopMethods = {
-              serializeAsArg() { return { ["__dotNetObject"]: 0 }; },
+              serializeAsArg() { return { ['__dotNetObject']: 0 }; },
               dispose() { },
               invokeMethod: invokeMethodLightMode,
               invokeMethodAsync: invokeMethodAsyncLightMode
           };
           attachWebRendererInterop(WebRendererId.Server, interopMethods, undefined, undefined);
-          for (const invokeJsInfo of response.invokeJsInfos)
-              beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId);
-          onAfterRender();
+          for (const invokeJsInfo of response.invokeJsInfos) {
+              void beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId).catch(error => console.error('beginInvokeJSFromDotNet error', error));
+          }
+          void circuitTransport.continueFrom(response).catch(error => console.error('initial continuation error', error));
       }
   }
-  let requestId = "";
-  const jsonRevivers = [];
-  window['DotNet'] = DotNet;
-  document.addEventListener("DOMContentLoaded", function (event) {
-      if (window["__lightmode_initialized"])
+  document.addEventListener('DOMContentLoaded', function () {
+      if (window['__lightmode_initialized']) {
           return;
-      window["__lightmode_initialized"] = true;
+      }
+      window['__lightmode_initialized'] = true;
       const commentNodes = document.getRootNode().childNodes;
       for (let i = commentNodes.length - 1; i >= 0; i--) {
           const commentNode = commentNodes[i];
           if (commentNode.nodeType === Node.COMMENT_NODE) {
               requestId = commentNode.nodeValue.substring(10);
-              console.log("requestId", requestId);
+              console.log('requestId', requestId);
               break;
           }
       }
@@ -3248,76 +3355,52 @@
       renderBatch(WebRendererId.Server, new OutOfProcessRenderBatch(binaryBatch));
   }
   function invokeMethodLightMode(methodIdentifier, ...args) {
-      console.log("invokeMethodLightMode", methodIdentifier, args);
+      console.log('invokeMethodLightMode', methodIdentifier, args);
       return null;
   }
-  function invokeMethodAsyncLightMode(methodIdentifier, ...args) {
-      return new Promise(async (resolve, reject) => {
-          return await circuitFetch(`_invokeMethodAsync`, {
-              RequestId: requestId,
-              AssemblyName: null,
-              MethodIdentifier: methodIdentifier,
-              ObjectReference: 0,
-              Arguments: args
-          });
-      });
-  }
-  function locationChanged(uri, intercepted) {
-      return circuitFetch(`_locationChanged`, {
+  async function invokeMethodAsyncLightMode(methodIdentifier, ...args) {
+      await circuitFetch('_invokeMethodAsync', {
           RequestId: requestId,
-          Location: uri,
+          AssemblyName: null,
+          MethodIdentifier: methodIdentifier,
+          ObjectReference: 0,
+          Arguments: args
       });
+      return null;
   }
-  function onAfterRender() {
-      return circuitFetch(`_onAfterRender`, {
+  function locationChanged(uri, _intercepted) {
+      return circuitFetch('_locationChanged', {
           RequestId: requestId,
-      });
-  }
-  function waitForRender() {
-      return circuitFetch(`_waitForRender`, {
-          RequestId: requestId,
+          Location: uri
       });
   }
   function endInvokeJSFromDotNet(identifier, asyncHandle, success, result) {
-      return circuitFetch(`_endInvokeJSFromDotNet`, {
+      return circuitFetch('_endInvokeJSFromDotNet', {
           RequestId: requestId,
           AsyncHandle: asyncHandle,
           Success: success,
           Result: result
       });
   }
-  function circuitFetch(uri, body) {
-      console.log("circuitFetch", uri, body);
-      return new Promise((resolve, reject) => {
-          fetch(uri, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(body)
-          }).then(async (response) => {
-              if (response.status === 404) {
-                  location.reload();
-                  return;
-              }
-              let lightModeResponse = await response.json();
-              await handleResponse(lightModeResponse);
-          }).catch(error => {
-              console.error(uri + " error", error);
-              reject(error);
-          });
-      });
+  async function circuitFetch(uri, body) {
+      console.log('circuitFetch', uri, body);
+      try {
+          await circuitTransport.invoke(uri, body);
+      }
+      catch (error) {
+          console.error(uri + ' error', error);
+          throw error;
+      }
   }
-  async function handleResponse(response) {
-      console.log("Handling response", response);
-      for (const batch of response.serializedRenderBatches)
+  function applyLightModeResponse(response) {
+      console.log('Handling response', response);
+      for (const batch of response.serializedRenderBatches) {
           renderSerializedRenderBatch(batch);
-      for (const invokeJsInfo of response.invokeJsInfos)
-          beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId);
-      if (response.needsAfterRender)
-          await onAfterRender();
-      if (!response.renderCompleted)
-          await waitForRender();
+      }
+      acknowledgedResponseId = response.responseId ?? acknowledgedResponseId;
+      for (const invokeJsInfo of response.invokeJsInfos) {
+          void beginInvokeJSFromDotNet(invokeJsInfo.taskId, invokeJsInfo.identifier, invokeJsInfo.argsJson, invokeJsInfo.resultType, invokeJsInfo.targetInstanceId).catch(error => console.error('beginInvokeJSFromDotNet error', error));
+      }
   }
   function base64ToUint8Array(base64) {
       const binaryString = atob(base64);
@@ -3328,22 +3411,25 @@
       }
       return binaryBatch;
   }
-  function beginInvokeJSFromDotNet(asyncHandle, identifier, argsJson, resultType, targetInstanceId) {
-      // Coerce synchronous functions into async ones, plus treat
-      // synchronous exceptions the same as async ones
-      const promise = new Promise(resolve => {
+  async function beginInvokeJSFromDotNet(asyncHandle, identifier, argsJson, resultType, targetInstanceId) {
+      let success = true;
+      let resultPayload = 'null';
+      try {
           const args = argsJson ? parseJsonWithRevivers(argsJson) : null;
           const jsFunction = DotNet.findJSFunction(identifier, targetInstanceId);
           const synchronousResultOrPromise = jsFunction(...(args || []));
-          resolve(synchronousResultOrPromise);
-      });
-      // We only listen for a result if the caller wants to be notified about it
-      if (asyncHandle) {
-          promise.then(result => endInvokeJSFromDotNet(identifier, asyncHandle, true, JSON.stringify(createJSCallResult(result, resultType))), error => {
-              console.error(error);
-              return endInvokeJSFromDotNet(identifier, asyncHandle, false, JSON.stringify([asyncHandle, false, (error)]));
-          });
+          const result = await Promise.resolve(synchronousResultOrPromise);
+          resultPayload = JSON.stringify(createJSCallResult(result, resultType));
       }
+      catch (error) {
+          console.error(error);
+          success = false;
+          resultPayload = JSON.stringify([asyncHandle, false, formatError(error)]);
+      }
+      if (!asyncHandle || resultType === JSCallResultType.JSVoidResult) {
+          return;
+      }
+      await endInvokeJSFromDotNet(identifier, asyncHandle, success, resultPayload);
   }
   function createJSCallResult(returnValue, resultType) {
       switch (resultType) {
@@ -3359,6 +3445,15 @@
               throw new Error(`Invalid JS call result type '${resultType}'.`);
       }
   }
+  function formatError(error) {
+      if (error instanceof Error) {
+          return `${error.message}\n${error.stack}`;
+      }
+      if (typeof error === 'string') {
+          return error;
+      }
+      return error ? error.toString() : 'null';
+  }
   function attachReviver(reviver) {
       jsonRevivers.push(reviver);
   }
@@ -3369,23 +3464,17 @@
   function getCaptureIdAttributeName(referenceCaptureId) {
       return `_bl_${referenceCaptureId}`;
   }
-  const elementRefKey = '__internalId'; // Keep in sync with ElementRef.cs
-  // attach element reference reviver
+  const elementRefKey = '__internalId';
   attachReviver((key, value) => {
       if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, elementRefKey) && typeof value[elementRefKey] === 'string') {
           return getElementByCaptureId(value[elementRefKey]);
       }
-      else {
-          return value;
-      }
+      return value;
   });
   function parseJsonWithRevivers(json) {
-      const result = json ? JSON.parse(json, (key, initialValue) => {
-          // Invoke each reviver in order, passing the output from the previous reviver,
-          // so that each one gets a chance to transform the value
+      return json ? JSON.parse(json, (key, initialValue) => {
           return jsonRevivers.reduce((latestValue, reviver) => reviver(key, latestValue), initialValue);
       }) : null;
-      return result;
   }
   Blazor._internal.PageTitle.getAndRemoveExistingTitle = function () {
       const titleElement = document.querySelector('title');

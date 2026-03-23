@@ -1,16 +1,15 @@
-﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
+using Microsoft.JSInterop;
 
 namespace Blazor.LightMode;
 
-public class LightModeNavigationManager : NavigationManager
+public class LightModeNavigationManager(IJSRuntime jsRuntime) : NavigationManager
 {
-    private string? _baseUri;
-    
+    private const string NavigateToMethod = "Blazor._internal.navigationManager.navigateTo";
+
     public new void Initialize(string baseUri, string uri)
     {
-        _baseUri = baseUri;
-        
         base.Initialize(baseUri, uri);
         NotifyLocationChanged(isInterceptedLink: false);
     }
@@ -37,10 +36,7 @@ public class LightModeNavigationManager : NavigationManager
                     return;
                 }
 
-                var absoluteUri = _baseUri + uri;
-                Uri = absoluteUri;
-                
-                NotifyLocationChanged(isInterceptedLink: false);
+                await jsRuntime.InvokeVoidAsync(NavigateToMethod, uri, options);
             }
             catch (TaskCanceledException)
             {
